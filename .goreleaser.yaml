@@ -52,37 +52,20 @@ release:
 
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
 
-brews:
+homebrew_casks:
   - name: envy
-    homepage: https://github.com/front-matter/envy
-    description: "Envy is an environment variable manager for Docker."
-    license: MIT
+    # Optional: either set it to Casks, or remove it:
+    directory: Casks
 
-    # The tap repository to push the formula to
-    repository:
-      owner: front-matter
-      name: homebrew-envy
-      # Separate token needed — GITHUB_TOKEN can't push to other repos
-      token: "{{ .Env.HOMEBREW_TOKEN }}"
+    # Optional: helps pass `homebrew audit` if homepage is different from download domain:
+    url:
+      verified: github.com/front-matter/envy
 
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-
-    commit_msg_template: "chore: update {{ .ProjectName }} formula to {{ .Tag }}"
-
-    # Install instructions
-    install: |
-      bin.install "envy"
-
-    # Post-install message
-    caveats: |
-      Run `envy --help` to get started.
-      Place env.yaml in your project root and run `envy compose`.
-
-    # Shell completion
-    extra_install: |
-      generate_completions_from_executable(bin/"envy", "completion")
-
-    test: |
-      system "#{bin}/envy", "--version"
+    # Optional: if your app/binary isn't signed and notarized, you'll need this:
+    hooks:
+      post:
+        # replace foo with the actual binary name
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/envy"]
+          end
