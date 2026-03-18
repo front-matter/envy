@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
@@ -210,7 +211,7 @@ func consolidateCommonGroupVars(m *manifest.Manifest) {
 func sameManifestVar(left, right manifest.Var) bool {
 	return left.Key == right.Key &&
 		left.Description == right.Description &&
-		left.Default.String() == right.Default.String() &&
+		left.Default == right.Default &&
 		left.Required == right.Required &&
 		left.Secret == right.Secret &&
 		left.Example == right.Example
@@ -338,10 +339,10 @@ func composeEnvToVars(env types.MappingWithEquals) []manifest.Var {
 
 		vars = append(vars, manifest.Var{
 			Key:         key,
-			Default:     manifest.ScalarValue(defaultValue),
+			Default:     defaultValue,
 			Description: "Imported from compose environment",
-			Required:    required,
-			Secret:      isSecretVar(key),
+			Required:    strconv.FormatBool(required),
+			Secret:      strconv.FormatBool(isSecretVar(key)),
 		})
 	}
 

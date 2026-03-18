@@ -49,8 +49,8 @@ APP_NAME=TestApp
 	}
 
 	for _, v := range group.Vars {
-		if v.Key == "APP_NAME" && v.Default.String() != "TestApp" {
-			t.Errorf("expected APP_NAME default to be preserved, got %s", v.Default.String())
+		if v.Key == "APP_NAME" && v.Default != "TestApp" {
+			t.Errorf("expected APP_NAME default to be preserved, got %s", v.Default)
 		}
 	}
 }
@@ -61,8 +61,8 @@ func TestMergeManifests(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"db": {
 				Vars: []manifest.Var{
-					{Key: "DB_HOST", Default: manifest.ScalarValue("localhost")},
-					{Key: "DB_PORT", Default: manifest.ScalarValue("5432")},
+					{Key: "DB_HOST", Default: "localhost"},
+					{Key: "DB_PORT", Default: "5432"},
 				},
 			},
 		},
@@ -76,13 +76,13 @@ func TestMergeManifests(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"web": {
 				Vars: []manifest.Var{
-					{Key: "APP_NAME", Default: manifest.ScalarValue("myapp")},
+					{Key: "APP_NAME", Default: "myapp"},
 				},
 			},
 			"db": {
 				Vars: []manifest.Var{
-					{Key: "DB_HOST", Default: manifest.ScalarValue("db.example.com")},
-					{Key: "DB_USER", Default: manifest.ScalarValue("admin")},
+					{Key: "DB_HOST", Default: "db.example.com"},
+					{Key: "DB_USER", Default: "admin"},
 				},
 			},
 		},
@@ -105,7 +105,7 @@ func TestMergeManifests(t *testing.T) {
 
 	// Check that env2's version of DB_HOST (db.example.com) is used
 	for _, v := range dbGroup.Vars {
-		if v.Key == "DB_HOST" && v.Default.String() != "db.example.com" {
+		if v.Key == "DB_HOST" && v.Default != "db.example.com" {
 			t.Errorf("expected DB_HOST to be overridden to 'db.example.com', got %s", v.Default)
 		}
 	}
@@ -148,7 +148,7 @@ func TestMergeThreeManifests(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "VAR_1", Default: manifest.ScalarValue("value1")},
+					{Key: "VAR_1", Default: "value1"},
 				},
 			},
 		},
@@ -159,7 +159,7 @@ func TestMergeThreeManifests(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "VAR_2", Default: manifest.ScalarValue("value2")},
+					{Key: "VAR_2", Default: "value2"},
 				},
 			},
 		},
@@ -170,8 +170,8 @@ func TestMergeThreeManifests(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "VAR_1", Default: manifest.ScalarValue("value1_updated")},
-					{Key: "VAR_3", Default: manifest.ScalarValue("value3")},
+					{Key: "VAR_1", Default: "value1_updated"},
+					{Key: "VAR_3", Default: "value3"},
 				},
 			},
 		},
@@ -186,7 +186,7 @@ func TestMergeThreeManifests(t *testing.T) {
 
 	// Check that last source wins for VAR_1
 	for _, v := range appGroup.Vars {
-		if v.Key == "VAR_1" && v.Default.String() != "value1_updated" {
+		if v.Key == "VAR_1" && v.Default != "value1_updated" {
 			t.Errorf("expected VAR_1 to be 'value1_updated' from m3, got %s", v.Default)
 		}
 	}
@@ -201,8 +201,8 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"web": {
 				Vars: []manifest.Var{
-					{Key: "APP_ENV", Default: manifest.ScalarValue("production")},
-					{Key: "DB_HOST", Default: manifest.ScalarValue("db")},
+					{Key: "APP_ENV", Default: "production"},
+					{Key: "DB_HOST", Default: "db"},
 				},
 			},
 		},
@@ -213,8 +213,8 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"env": {
 				Vars: []manifest.Var{
-					{Key: "APP_ENV", Default: manifest.ScalarValue("local")},
-					{Key: "EXTRA_ONLY", Default: manifest.ScalarValue("1")},
+					{Key: "APP_ENV", Default: "local"},
+					{Key: "EXTRA_ONLY", Default: "1"},
 				},
 			},
 		},
@@ -232,7 +232,7 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 
 	webGroup := merged.Groups["web"]
 	for _, v := range webGroup.Vars {
-		if v.Key == "APP_ENV" && v.Default.String() != "production" {
+		if v.Key == "APP_ENV" && v.Default != "production" {
 			t.Fatalf("expected compose APP_ENV to be preserved, got %s", v.Default)
 		}
 	}

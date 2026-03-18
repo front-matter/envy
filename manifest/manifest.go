@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -273,39 +272,6 @@ type groupYAML struct {
 	Vars        *yaml.Node `yaml:"vars,omitempty"`
 }
 
-// ScalarValue stores a YAML scalar default and exposes it as a string for env generation.
-type ScalarValue string
-
-func (v *ScalarValue) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == 0 {
-		*v = ""
-		return nil
-	}
-
-	if node.Kind != yaml.ScalarNode {
-		return fmt.Errorf("expected scalar default, got YAML kind %d", node.Kind)
-	}
-
-	switch node.Tag {
-	case "!!bool":
-		parsed, err := strconv.ParseBool(node.Value)
-		if err != nil {
-			return err
-		}
-		*v = ScalarValue(strconv.FormatBool(parsed))
-	case "!!int", "!!float", "!!str", "!!null", "":
-		*v = ScalarValue(node.Value)
-	default:
-		*v = ScalarValue(node.Value)
-	}
-
-	return nil
-}
-
-func (v ScalarValue) String() string {
-	return string(v)
-}
-
 // OrderedGroups returns all groups in deterministic order.
 func (m *Manifest) OrderedGroups() []Group {
 	keys := make([]string, 0, len(m.Groups))
@@ -326,12 +292,24 @@ func (m *Manifest) OrderedGroups() []Group {
 
 // Var defines a single environment variable's spec.
 type Var struct {
-	Key         string      `yaml:"key"`
-	Description string      `yaml:"description,omitempty"`
-	Default     ScalarValue `yaml:"default,omitempty"`
-	Required    bool        `yaml:"required,omitempty"`
-	Secret      bool        `yaml:"secret,omitempty"`
-	Example     string      `yaml:"example,omitempty"`
+	Key         string `yaml:"key"`
+	Description string `yaml:"description,omitempty"`
+	Default     string `yaml:"default,omitempty"`
+	Required    string `yaml:"required,omitempty"`
+	Secret      string `yaml:"secret,omitempty"`
+	Example     string `yaml:"example,omitempty"`
+}
+
+func (v Var) DefaultString() string {
+	return v.Default
+}
+
+func (v Var) IsRequired() bool {
+	return strings.EqualFold(strings.TrimSpace(v.Required), "true")
+}
+
+func (v Var) IsSecret() bool {
+	return strings.EqualFold(strings.TrimSpace(v.Secret), "true")
 }
 
 // MarshalYAML omits import placeholder descriptions and emits defaults as strings.
@@ -345,11 +323,11 @@ func (v Var) MarshalYAML() (interface{}, error) {
 	if description != "" {
 		appendMapping(node, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: description})
 	}
-	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Default.String()})
-	if v.Required {
+	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Default})
+	if v.IsRequired() {
 		appendMapping(node, "required", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 	}
-	if v.Secret {
+	if v.IsSecret() {
 		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
 	}
 	if v.Example != "" {
@@ -605,7 +583,7 @@ func (m *Manifest) VarsForService(serviceName string) []Var {
 func (m *Manifest) SecretVars() []Var {
 	var vars []Var
 	for _, v := range m.AllVars() {
-		if v.Secret {
+		if v.IsSecret() {
 			vars = append(vars, v)
 		}
 	}
@@ -616,7 +594,7 @@ func (m *Manifest) SecretVars() []Var {
 func (m *Manifest) RequiredVars() []Var {
 	var vars []Var
 	for _, v := range m.AllVars() {
-		if v.Required {
+		if v.IsRequired() {
 			vars = append(vars, v)
 		}
 	}

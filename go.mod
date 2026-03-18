@@ -2,6 +2,8 @@ module github.com/front-matter/envy
 
 go 1.24.0
 
+toolchain go1.24.13
+
 require (
 	github.com/compose-spec/compose-go/v2 v2.10.1
 	github.com/fatih/color v1.18.0

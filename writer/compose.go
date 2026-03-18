@@ -172,7 +172,15 @@ func composeServicePlatform(svc manifest.Service) string {
 func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *yaml.Node {
 	environment := &yaml.Node{Kind: yaml.MappingNode}
 	for _, g := range groups {
-		if len(g.Vars) == 0 {
+		visibleVars := make([]manifest.Var, 0, len(g.Vars))
+		for _, v := range g.Vars {
+			if v.IsSecret() {
+				continue
+			}
+			visibleVars = append(visibleVars, v)
+		}
+
+		if len(visibleVars) == 0 {
 			continue
 		}
 		dashes := strings.Repeat("─", dashWidth(g.GroupKey))
@@ -181,7 +189,7 @@ func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *
 			groupHeader += "\n# " + desc
 		}
 		first := true
-		for _, v := range g.Vars {
+		for _, v := range visibleVars {
 			key := scalarNode(v.Key, 0)
 			var headComment string
 			if first {
@@ -217,9 +225,9 @@ func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *
 }
 
 func composeEnvValue(v manifest.Var, flavor string) string {
-	defaultVal := v.Default.String()
+	defaultVal := v.DefaultString()
 
-	if flavor == "coolify" && v.Required {
+	if flavor == "coolify" && v.IsRequired() {
 		return fmt.Sprintf("${%s:?%s}", v.Key, defaultVal)
 	}
 

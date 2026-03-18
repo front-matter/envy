@@ -85,7 +85,7 @@ EMPTY_VALUE=
 
 	group := m.Groups["env"]
 	for _, v := range group.Vars {
-		if v.Default.String() == "" && v.Key != "EMPTY_VALUE" {
+		if v.Default == "" && v.Key != "EMPTY_VALUE" {
 			t.Errorf("%s: expected default value to be preserved", v.Key)
 		}
 	}

@@ -13,8 +13,8 @@ func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "REQ", Default: manifest.ScalarValue("x"), Description: "required var", Required: true},
-					{Key: "OPT", Default: manifest.ScalarValue("y"), Description: "optional var", Required: false},
+					{Key: "REQ", Default: "x", Description: "required var", Required: "true"},
+					{Key: "OPT", Default: "y", Description: "optional var", Required: "false"},
 				},
 			},
 		},

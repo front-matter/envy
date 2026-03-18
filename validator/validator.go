@@ -27,7 +27,7 @@ func Validate(m *manifest.Manifest, env map[string]string) []Error {
 		for _, v := range group.Vars {
 			value, present := env[v.Key]
 
-			if v.Required && (!present || value == "") {
+			if v.IsRequired() && (!present || value == "") {
 				errs = append(errs, Error{Level: "MISSING", Key: v.Key})
 				continue
 			}

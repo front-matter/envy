@@ -27,9 +27,9 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 
 		vars = append(vars, manifest.Var{
 			Key:         key,
-			Default:     manifest.ScalarValue(value),
+			Default:     value,
 			Description: "Imported from .env file",
-			Secret:      true,
+			Secret:      "true",
 		})
 	}
 

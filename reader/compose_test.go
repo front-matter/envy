@@ -195,21 +195,21 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 	if secretVar == nil {
 		t.Fatal("expected DATABASE_PASSWORD variable")
 	}
-	if !secretVar.Secret {
+	if !secretVar.IsSecret() {
 		t.Errorf("DATABASE_PASSWORD should be marked as secret")
 	}
 
 	if apiSecretVar == nil {
 		t.Fatal("expected API_SECRET_KEY variable")
 	}
-	if !apiSecretVar.Secret {
+	if !apiSecretVar.IsSecret() {
 		t.Errorf("API_SECRET_KEY should be marked as secret")
 	}
 
 	if normalVar == nil {
 		t.Fatal("expected API_URL variable")
 	}
-	if normalVar.Secret {
+	if normalVar.IsSecret() {
 		t.Errorf("API_URL should not be marked as secret")
 	}
 }

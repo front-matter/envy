@@ -41,16 +41,16 @@ func renderMarkdown(m *manifest.Manifest) string {
 
 		for _, v := range group.Vars {
 			req := "—"
-			if v.Required {
+			if v.IsRequired() {
 				req = "✅"
 			}
 			secret := ""
-			if v.Secret {
+			if v.IsSecret() {
 				secret = " 🔒"
 			}
 			defaultVal := "—"
-			if v.Default.String() != "" {
-				defaultVal = fmt.Sprintf("`%s`", v.Default.String())
+			if v.DefaultString() != "" {
+				defaultVal = fmt.Sprintf("`%s`", v.DefaultString())
 			}
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
 			sb.WriteString(fmt.Sprintf(
@@ -80,7 +80,7 @@ func renderRST(m *manifest.Manifest) string {
 
 		for _, v := range group.Vars {
 			req := ""
-			if v.Required {
+			if v.IsRequired() {
 				req = " *(required)*"
 			}
 			sb.WriteString(fmt.Sprintf(".. envvar:: %s%s\n\n", v.Key, req))
@@ -88,8 +88,8 @@ func renderRST(m *manifest.Manifest) string {
 			for _, line := range strings.Split(desc, "\n") {
 				sb.WriteString(fmt.Sprintf("   %s\n", line))
 			}
-			if v.Default.String() != "" {
-				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", v.Default.String()))
+			if v.DefaultString() != "" {
+				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", v.DefaultString()))
 			}
 			sb.WriteString("\n")
 		}
@@ -110,14 +110,14 @@ func renderTable(m *manifest.Manifest) string {
 		sb.WriteString(fmt.Sprintf("\n# %s\n", group.Key))
 		for _, v := range group.Vars {
 			req := "opt"
-			if v.Required {
+			if v.IsRequired() {
 				req = "REQ"
 			}
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
 			if len(desc) > 60 {
 				desc = desc[:57] + "..."
 			}
-			defaultVal := v.Default.String()
+			defaultVal := v.DefaultString()
 			if len(defaultVal) > 38 {
 				defaultVal = defaultVal[:35] + "..."
 			}

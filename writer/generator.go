@@ -29,7 +29,7 @@ func Generate(m *manifest.Manifest, opts Options) string {
 		sb.WriteString(fmt.Sprintf("# %s\n", group.Description))
 
 		for _, v := range group.Vars {
-			if v.Secret && !opts.IncludeSecrets {
+			if v.IsSecret() && !opts.IncludeSecrets {
 				sb.WriteString(fmt.Sprintf(
 					"# %s=  # SECRET — inject via SOPS or environment\n", v.Key,
 				))
@@ -37,7 +37,7 @@ func Generate(m *manifest.Manifest, opts Options) string {
 			}
 
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
-			if v.Required {
+			if v.IsRequired() {
 				sb.WriteString(fmt.Sprintf("# [REQUIRED] %s\n", desc))
 			} else {
 				sb.WriteString(fmt.Sprintf("# %s\n", desc))
@@ -47,7 +47,7 @@ func Generate(m *manifest.Manifest, opts Options) string {
 				sb.WriteString(fmt.Sprintf("# Example: %s\n", v.Example))
 			}
 
-			sb.WriteString(fmt.Sprintf("%s=%s\n", v.Key, v.Default.String()))
+			sb.WriteString(fmt.Sprintf("%s=%s\n", v.Key, v.DefaultString()))
 		}
 		sb.WriteString("\n")
 	}

@@ -27,7 +27,7 @@ func TestGenerateComposeIncludesCommentsAndLists(t *testing.T) {
 		},
 		Groups: map[string]manifest.Group{
 			"application": {
-				Vars: []manifest.Var{{Key: "APP_ENV", Default: manifest.ScalarValue("production")}},
+				Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}},
 			},
 		},
 	}
@@ -63,25 +63,25 @@ func TestComposeEnvValue(t *testing.T) {
 		{
 			name:   "default fallback",
 			flavor: "default",
-			varDef: manifest.Var{Key: "APP_ENV", Default: manifest.ScalarValue("production")},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production"},
 			want:   "${APP_ENV:-production}",
 		},
 		{
 			name:   "coolify required uses question fallback",
 			flavor: "coolify",
-			varDef: manifest.Var{Key: "APP_ENV", Default: manifest.ScalarValue("production"), Required: true},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "true"},
 			want:   "${APP_ENV:?production}",
 		},
 		{
 			name:   "coolify optional keeps dash fallback",
 			flavor: "coolify",
-			varDef: manifest.Var{Key: "APP_ENV", Default: manifest.ScalarValue("production"), Required: false},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "false"},
 			want:   "${APP_ENV:-production}",
 		},
 		{
 			name:   "json with variable reference",
 			flavor: "default",
-			varDef: manifest.Var{Key: "APP_JSON", Default: manifest.ScalarValue(`{"name":"demo"}`)},
+			varDef: manifest.Var{Key: "APP_JSON", Default: `{"name":"demo"}`},
 			want:   `${APP_JSON:-{"name":"demo"}}`,
 		},
 	}
@@ -122,8 +122,8 @@ func TestGenerateComposeExcludesServices(t *testing.T) {
 			{Name: "db", Image: "postgres:17", Groups: []string{"database"}},
 		},
 		Groups: map[string]manifest.Group{
-			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: manifest.ScalarValue("production")}}},
-			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: manifest.ScalarValue("app")}}},
+			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}}},
+			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: "app"}}},
 		},
 	}
 
@@ -144,8 +144,8 @@ func TestGenerateComposeExcludesSelectedService(t *testing.T) {
 			{Name: "db", Image: "postgres:17", Groups: []string{"database"}},
 		},
 		Groups: map[string]manifest.Group{
-			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: manifest.ScalarValue("production")}}},
-			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: manifest.ScalarValue("app")}}},
+			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}}},
+			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: "app"}}},
 		},
 	}
 
@@ -159,5 +159,39 @@ func TestGenerateComposeExcludesSelectedService(t *testing.T) {
 	}
 	if !strings.Contains(compose, "services: {}") {
 		t.Fatalf("compose output should contain an empty services mapping when all selected services are excluded\n%s", compose)
+	}
+}
+
+func TestGenerateComposeOmitsSecretVars(t *testing.T) {
+	m := &manifest.Manifest{
+		Services: []manifest.Service{{
+			Name:   "web",
+			Image:  "ghcr.io/example/web:latest",
+			Groups: []string{"application"},
+		}},
+		Groups: map[string]manifest.Group{
+			"application": {
+				Description: "App settings",
+				Vars: []manifest.Var{
+					{Key: "PUBLIC_URL", Default: "https://example.org"},
+					{Key: "SECRET_KEY", Default: "changeme", Secret: "true"},
+				},
+			},
+		},
+	}
+
+	compose := GenerateCompose(m, ComposeOptions{})
+
+	if !strings.Contains(compose, "PUBLIC_URL") {
+		t.Fatalf("compose output missing non-secret var\n%s", compose)
+	}
+	if strings.Contains(compose, "SECRET_KEY") {
+		t.Fatalf("compose output should omit secret vars\n%s", compose)
+	}
+	if !strings.Contains(compose, "# ── application") {
+		t.Fatalf("compose output missing group header for visible vars\n%s", compose)
+	}
+	if strings.Contains(compose, "changeme") {
+		t.Fatalf("compose output should not contain secret default values\n%s", compose)
 	}
 }

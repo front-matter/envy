@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestScalarValueUnmarshalYAML(t *testing.T) {
+func TestStringDefaultUnmarshalYAML(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
@@ -22,12 +22,12 @@ func TestScalarValueUnmarshalYAML(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var data struct {
-				Default ScalarValue `yaml:"default"`
+				Default string `yaml:"default"`
 			}
 			if err := yaml.Unmarshal([]byte(test.yaml), &data); err != nil {
 				t.Fatalf("yaml.Unmarshal() error = %v", err)
 			}
-			if got := data.Default.String(); got != test.want {
+			if got := data.Default; got != test.want {
 				t.Fatalf("default = %q, want %q", got, test.want)
 			}
 		})
@@ -60,7 +60,6 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 
 	output := string(data)
 	checks := []string{
-		"invenio_version:",
 		"description: \"\"",
 		"docs: \"\"",
 		"platform: \"\"",
@@ -118,9 +117,9 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 		Groups: map[string]Group{
 			"env": {
 				Vars: []Var{
-					{Key: "STRING_VALUE", Default: ScalarValue("production"), Example: "demo-value"},
-					{Key: "BOOL_TRUE", Default: ScalarValue("true")},
-					{Key: "BOOL_FALSE", Default: ScalarValue("false")},
+					{Key: "STRING_VALUE", Default: "production", Example: "demo-value"},
+					{Key: "BOOL_TRUE", Default: "true"},
+					{Key: "BOOL_FALSE", Default: "false"},
 				},
 			},
 		},
@@ -266,8 +265,8 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	if len(group.Vars) != 1 || group.Vars[0].Key != "APP_ENV" {
 		t.Fatalf("expected APP_ENV var, got %+v", group.Vars)
 	}
-	if group.Vars[0].Default.String() != "production" {
-		t.Fatalf("expected default production, got %q", group.Vars[0].Default.String())
+	if group.Vars[0].Default != "production" {
+		t.Fatalf("expected default production, got %q", group.Vars[0].Default)
 	}
 }
 
