@@ -12,11 +12,36 @@ All env variables are always treated as strings to avoid type casting issues wit
 
 ## Install
 
+Envy is a single Go binary, available for download from the [releases page](https://github.com/front-matter/envy/releases). Download the binary for your platform (Linux, Mac, Windows; X86 or ARM architecture), and place it in your PATH. Linux packages in deb, rpm and apk formats are also available from the releases page.
+
+### Homebrew
+
+To install envy on macOS using [Homebrew](https://brew.sh/), run:
+
+```bash
+brew tap front-matter/envy
+brew install envy
+```
+
+### Go
+
+To install envy using Go, run:
+
+
 ```bash
 go install github.com/front-matter/envy@latest
 ```
 
 Or download a binary from [Releases](https://github.com/front-matter/envy/releases).
+
+### Homebrew
+
+To install envy on macOS using [Homebrew](https://brew.sh/), run:
+
+```bash
+brew tap front-matter/envy
+brew install envy
+```
 
 ## Usage
 
