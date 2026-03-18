@@ -36,12 +36,13 @@ File paths: The --file flag can be either a folder or a file path ending in .yam
 
 Examples:
   envy import
-	envy import --file config/
-	envy import --file config.yaml
 	  envy import .env
 	  envy import compose.yaml
-	  envy import /path/to/dir
-	envy import /path/to/dir --file output/`,
+	  envy import compose.sops.yaml
+	  envy import ./config
+	  envy import compose.yaml --file ./generated
+	  envy import --file config/
+	  envy import --file config.yaml`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Resolve destination path (handles folder or file path)

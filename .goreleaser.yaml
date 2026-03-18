@@ -54,6 +54,9 @@ release:
 
 homebrew_casks:
   - name: envy
+    repository:
+      owner: front-matter
+      name: homebrew-envy
     # Optional: either set it to Casks, or remove it:
     directory: Casks
 

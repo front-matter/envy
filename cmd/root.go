@@ -12,18 +12,20 @@ var manifestPath string
 var rootCmd = &cobra.Command{
 	Use:   "envy",
 	Short: "Environment variable manager",
-	Long: `envy manages environment variables via a structured
-env.yaml manifest. It generates .env files, validates configuration,
+	Long: `envy manages environment variables via a structured env.yaml 
+manifest. It generates .env files, validates configuration,
 produces documentation, and audits secrets.
 
-  envy generate --no-secrets > .env.example
-	envy import compose.yaml --file env.yaml
-	envy compose -o compose.yaml
+	envy import
+	envy import compose.yaml --file ./generated
 	envy lint
-  envy validate --env-file .env.prod
-  envy diff
-  envy docs -o docs/ENV.md
-  envy secrets --check`,
+	envy diff .env.prod
+	envy compose
+	envy compose --flavor coolify --without-service db,cache
+	envy generate --no-secrets > .env.example
+	envy validate .env.prod
+	envy docs -o docs/ENV.md
+	envy secrets --check`,
 }
 
 // Execute is the entry point called by main.

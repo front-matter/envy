@@ -15,7 +15,7 @@ var validateCmd = &cobra.Command{
 	Use:   "validate [path]",
 	Short: "Validate a .env file against env.yaml",
 	Long: `Validate environment variables against the env.yaml schema.
-Checks required fields.
+Checks required fields and reports missing values.
 
 Examples:
   envy validate

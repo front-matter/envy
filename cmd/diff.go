@@ -17,8 +17,10 @@ var diffCmd = &cobra.Command{
 Reports variables defined in the manifest but absent from the file,
 and variables present in the file but not in the manifest.
 
-Example:
-	  envy diff .env.prod`,
+Examples:
+	  envy diff
+	  envy diff .env.prod
+	  envy diff ./config`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := resolveManifest(manifestPath)

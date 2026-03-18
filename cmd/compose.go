@@ -28,11 +28,12 @@ from env.yaml defaults.
 
 Examples:
   envy compose
+	  envy compose --flavor coolify
+	  envy compose --without-service db,cache
+	  envy compose --service web
+	  envy compose --file out/
   envy compose -o docker-compose.yml
-	envy compose --file out/
-  envy compose --service web   # emit only the 'web' service
-	envy compose --without-service db,cache
-  envy compose --flavor coolify`,
+	  envy compose --service web --without-service db,cache`,
 
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if composeFlavor != "default" && composeFlavor != "coolify" {
