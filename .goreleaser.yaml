@@ -51,3 +51,78 @@ release:
     ---
 
     Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
+
+# .goreleaser.yaml
+version: 2
+
+project_name: envy
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - name: envy
+    homepage: https://github.com/front-matter/envy
+    description: "Envy is an environment variable manager for Docker."
+    license: MIT
+
+    # The tap repository to push the formula to
+    repository:
+      owner: front-matter
+      name: homebrew-envy
+      # Separate token needed — GITHUB_TOKEN can't push to other repos
+      token: "{{ .Env.HOMEBREW_TOKEN }}"
+
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+
+    commit_msg_template: "chore: update {{ .ProjectName }} formula to {{ .Tag }}"
+
+    # Install instructions
+    install: |
+      bin.install "envy"
+
+    # Post-install message
+    caveats: |
+      Run `envy --help` to get started.
+      Place env.yaml in your project root and run `envy compose`.
+
+    # Shell completion
+    extra_install: |
+      generate_completions_from_executable(bin/"envy", "completion")
+
+    test: |
+      system "#{bin}/envy", "--version"
