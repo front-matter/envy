@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/front-matter/envy/internal/manifest"
+	"github.com/front-matter/envy/manifest"
 	"github.com/spf13/cobra"
 )
 

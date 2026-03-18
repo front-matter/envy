@@ -11,12 +11,15 @@ var manifestPath string
 
 var rootCmd = &cobra.Command{
 	Use:   "envy",
-	Short: "InvenioRDM environment variable manager",
-	Long: `envy manages InvenioRDM environment variables via a structured
+	Short: "Environment variable manager",
+	Long: `envy manages environment variables via a structured
 env.yaml manifest. It generates .env files, validates configuration,
 produces documentation, and audits secrets.
 
   envy generate --no-secrets > .env.example
+	envy import compose.yaml --file env.yaml
+	envy compose -o compose.yaml
+	envy lint
   envy validate --env-file .env.prod
   envy diff
   envy docs -o docs/ENV.md

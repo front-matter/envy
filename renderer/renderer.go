@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/front-matter/envy/internal/manifest"
+	"github.com/front-matter/envy/manifest"
 )
 
 // Render dispatches to the correct format renderer.
@@ -29,15 +29,15 @@ func renderMarkdown(m *manifest.Manifest) string {
 
 	sb.WriteString(fmt.Sprintf("# %s — Environment Variable Reference\n\n", m.Meta.Name))
 	sb.WriteString(fmt.Sprintf(
-		"> InvenioRDM %s · [Upstream docs](%s)\n\n",
-		m.Meta.InvenioVersion, m.Meta.Docs,
+		"> %s · [Upstream docs](%s)\n\n",
+		m.Meta.VersionLabel(), m.Meta.Docs,
 	))
 
-	for _, group := range m.Groups {
-		sb.WriteString(fmt.Sprintf("## %s\n\n", group.Name))
+	for _, group := range m.OrderedGroups() {
+		sb.WriteString(fmt.Sprintf("## %s\n\n", group.Key))
 		sb.WriteString(fmt.Sprintf("%s\n\n", group.Description))
-		sb.WriteString("| Variable | Required | Default | Type | Description |\n")
-		sb.WriteString("|---|---|---|---|---|\n")
+		sb.WriteString("| Variable | Required | Default | Description |\n")
+		sb.WriteString("|---|---|---|---|\n")
 
 		for _, v := range group.Vars {
 			req := "—"
@@ -49,17 +49,13 @@ func renderMarkdown(m *manifest.Manifest) string {
 				secret = " 🔒"
 			}
 			defaultVal := "—"
-			if v.Default != "" {
-				defaultVal = fmt.Sprintf("`%s`", v.Default)
-			}
-			vtype := v.Type
-			if vtype == "" {
-				vtype = "string"
+			if v.Default.String() != "" {
+				defaultVal = fmt.Sprintf("`%s`", v.Default.String())
 			}
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
 			sb.WriteString(fmt.Sprintf(
-				"| `%s`%s | %s | %s | %s | %s |\n",
-				v.Key, secret, req, defaultVal, vtype, desc,
+				"| `%s`%s | %s | %s | %s |\n",
+				v.Key, secret, req, defaultVal, desc,
 			))
 		}
 		sb.WriteString("\n")
@@ -77,9 +73,9 @@ func renderRST(m *manifest.Manifest) string {
 	sb.WriteString(title + "\n")
 	sb.WriteString(strings.Repeat("=", len(title)) + "\n\n")
 
-	for _, group := range m.Groups {
-		sb.WriteString(group.Name + "\n")
-		sb.WriteString(strings.Repeat("-", len(group.Name)) + "\n\n")
+	for _, group := range m.OrderedGroups() {
+		sb.WriteString(group.Key + "\n")
+		sb.WriteString(strings.Repeat("-", len(group.Key)) + "\n\n")
 		sb.WriteString(group.Description + "\n\n")
 
 		for _, v := range group.Vars {
@@ -92,13 +88,8 @@ func renderRST(m *manifest.Manifest) string {
 			for _, line := range strings.Split(desc, "\n") {
 				sb.WriteString(fmt.Sprintf("   %s\n", line))
 			}
-			if v.Default != "" {
-				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", v.Default))
-			}
-			if len(v.Allowed) > 0 {
-				sb.WriteString(fmt.Sprintf(
-					"\n   **Allowed:** %s\n", strings.Join(v.Allowed, ", "),
-				))
+			if v.Default.String() != "" {
+				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", v.Default.String()))
 			}
 			sb.WriteString("\n")
 		}
@@ -115,8 +106,8 @@ func renderTable(m *manifest.Manifest) string {
 	sb.WriteString(header + "\n")
 	sb.WriteString(strings.Repeat("─", len(header)) + "\n")
 
-	for _, group := range m.Groups {
-		sb.WriteString(fmt.Sprintf("\n# %s\n", group.Name))
+	for _, group := range m.OrderedGroups() {
+		sb.WriteString(fmt.Sprintf("\n# %s\n", group.Key))
 		for _, v := range group.Vars {
 			req := "opt"
 			if v.Required {
@@ -126,7 +117,7 @@ func renderTable(m *manifest.Manifest) string {
 			if len(desc) > 60 {
 				desc = desc[:57] + "..."
 			}
-			defaultVal := v.Default
+			defaultVal := v.Default.String()
 			if len(defaultVal) > 38 {
 				defaultVal = defaultVal[:35] + "..."
 			}

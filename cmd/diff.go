@@ -5,22 +5,21 @@ import (
 	"sort"
 
 	"github.com/fatih/color"
-	"github.com/front-matter/envy/internal/envfile"
-	"github.com/front-matter/envy/internal/manifest"
+	"github.com/front-matter/envy/envfile"
+	"github.com/front-matter/envy/manifest"
 	"github.com/spf13/cobra"
 )
 
-var diffEnvFile string
-
 var diffCmd = &cobra.Command{
-	Use:   "diff",
+	Use:   "diff [path]",
 	Short: "Show variables missing from or extra in a .env file",
 	Long: `Compare env.yaml against a .env file.
 Reports variables defined in the manifest but absent from the file,
 and variables present in the file but not in the manifest.
 
 Example:
-  envy diff --env-file .env.prod`,
+	  envy diff .env.prod`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := resolveManifest(manifestPath)
 		if err != nil {
@@ -32,7 +31,12 @@ Example:
 			return err
 		}
 
-		ef, err := envfile.Load(diffEnvFile)
+		envPath, err := resolveEnvInputPath(args)
+		if err != nil {
+			return err
+		}
+
+		ef, err := envfile.Load(envPath)
 		if err != nil {
 			return err
 		}
@@ -63,19 +67,19 @@ Example:
 		sort.Strings(extra)
 
 		if len(missing) == 0 && len(extra) == 0 {
-			color.Green("\n✅ %s matches env.yaml exactly.\n", diffEnvFile)
+			color.Green("\n✅ %s matches env.yaml exactly.\n", envPath)
 			return nil
 		}
 
 		if len(missing) > 0 {
-			color.Yellow("\n📋 In env.yaml but missing from %s:", diffEnvFile)
+			color.Yellow("\n⚠️  In env.yaml but missing from %s:", envPath)
 			for _, k := range missing {
 				fmt.Printf("   - %s\n", k)
 			}
 		}
 
 		if len(extra) > 0 {
-			color.Cyan("\n➕ In %s but not in env.yaml:", diffEnvFile)
+			color.Yellow("\n⚠️ In %s but not in env.yaml:", envPath)
 			for _, k := range extra {
 				fmt.Printf("   + %s\n", k)
 			}
@@ -88,6 +92,4 @@ Example:
 
 func init() {
 	rootCmd.AddCommand(diffCmd)
-	diffCmd.Flags().StringVarP(&diffEnvFile, "env-file", "e", ".env",
-		"Path to .env file to compare")
 }
