@@ -325,10 +325,10 @@ func (v Var) MarshalYAML() (interface{}, error) {
 	}
 	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Default})
 	if v.IsRequired() {
-		appendMapping(node, "required", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
+		appendMapping(node, "required", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
 	if v.IsSecret() {
-		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"})
+		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
 	if v.Example != "" {
 		appendMapping(node, "example", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Example})

@@ -173,7 +173,7 @@ func TestFindImportFilesComposeFallbackOrder(t *testing.T) {
 	}
 }
 
-func TestImportCommandWritesBoolLikeDefaultsAsStrings(t *testing.T) {
+func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	tmp := t.TempDir()
 	envPath := filepath.Join(tmp, ".env")
 	outputPath := filepath.Join(tmp, "env.yaml")
@@ -199,17 +199,20 @@ func TestImportCommandWritesBoolLikeDefaultsAsStrings(t *testing.T) {
 	}
 
 	output := string(data)
-	if !strings.Contains(output, "default: \"true\"") {
-		t.Fatalf("expected string true default with quotes, got:\n%s", output)
+	if strings.Contains(output, "BOOL_TRUE:") {
+		t.Fatalf("expected BOOL_TRUE to be omitted as secret var, got:\n%s", output)
 	}
-	if !strings.Contains(output, "default: \"false\"") {
-		t.Fatalf("expected string false default with quotes, got:\n%s", output)
+	if strings.Contains(output, "BOOL_FALSE:") {
+		t.Fatalf("expected BOOL_FALSE to be omitted as secret var, got:\n%s", output)
 	}
-	if strings.Contains(output, "default: true\n") {
-		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)
+	if strings.Contains(output, "secret:") {
+		t.Fatalf("expected no secret fields in generated env.yaml, got:\n%s", output)
 	}
-	if strings.Contains(output, "default: false\n") {
-		t.Fatalf("did not expect YAML boolean false, got:\n%s", output)
+	if strings.Contains(output, "groups:") {
+		t.Fatalf("expected groups section to be omitted when all vars are secret, got:\n%s", output)
+	}
+	if !strings.Contains(output, "meta:") {
+		t.Fatalf("expected meta section in generated env.yaml, got:\n%s", output)
 	}
 }
 

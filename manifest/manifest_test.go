@@ -117,7 +117,7 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 		Groups: map[string]Group{
 			"env": {
 				Vars: []Var{
-					{Key: "STRING_VALUE", Default: "production", Example: "demo-value"},
+					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true"},
 					{Key: "BOOL_TRUE", Default: "true"},
 					{Key: "BOOL_FALSE", Default: "false"},
 				},
@@ -143,11 +143,23 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	if !strings.Contains(output, "example: \"demo-value\"") {
 		t.Fatalf("expected quoted string example value, got:\n%s", output)
 	}
+	if !strings.Contains(output, "required: \"true\"") {
+		t.Fatalf("expected quoted string required true, got:\n%s", output)
+	}
+	if !strings.Contains(output, "secret: \"true\"") {
+		t.Fatalf("expected quoted string secret true, got:\n%s", output)
+	}
 	if strings.Contains(output, "default: true\n") {
 		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)
 	}
 	if strings.Contains(output, "default: false\n") {
 		t.Fatalf("did not expect YAML boolean false, got:\n%s", output)
+	}
+	if strings.Contains(output, "required: true\n") {
+		t.Fatalf("did not expect YAML boolean required true, got:\n%s", output)
+	}
+	if strings.Contains(output, "secret: true\n") {
+		t.Fatalf("did not expect YAML boolean secret true, got:\n%s", output)
 	}
 	if !strings.Contains(output, "BOOL_TRUE:") {
 		t.Fatalf("expected group vars to be written as mapping style, got:\n%s", output)

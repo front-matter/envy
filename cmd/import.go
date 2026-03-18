@@ -103,7 +103,7 @@ Examples:
 		}
 
 		// Marshal and write
-		content, err := yaml.Marshal(merged)
+		content, err := yaml.Marshal(filterSecretVars(merged))
 		if err != nil {
 			return fmt.Errorf("rendering manifest YAML: %w", err)
 		}
@@ -297,4 +297,32 @@ func verifyServiceCommandVarsDefined(m *manifest.Manifest) []string {
 	}
 
 	return issues
+}
+
+// filterSecretVars removes vars marked as secret from groups before writing env.yaml.
+func filterSecretVars(m *manifest.Manifest) *manifest.Manifest {
+	if m == nil {
+		return nil
+	}
+
+	out := *m
+	out.Services = append([]manifest.Service(nil), m.Services...)
+	out.Volumes = append([]string(nil), m.Volumes...)
+	out.Networks = append([]string(nil), m.Networks...)
+
+	out.Groups = make(map[string]manifest.Group, len(m.Groups))
+	for groupKey, group := range m.Groups {
+		filteredVars := make([]manifest.Var, 0, len(group.Vars))
+		for _, v := range group.Vars {
+			if v.IsSecret() {
+				continue
+			}
+			filteredVars = append(filteredVars, v)
+		}
+
+		group.Vars = filteredVars
+		out.Groups[groupKey] = group
+	}
+
+	return &out
 }
