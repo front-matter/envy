@@ -1,8 +1,14 @@
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Reference](https://pkg.go.dev/badge/github.com/front-matter/envy.svg)](https://pkg.go.dev/github.com/front-matter/envy)
+[![Go Report Card](https://goreportcard.com/badge/github.com/front-matter/envy)](https://goreportcard.com/report/github.com/front-matter/envy)
+
 # envy
 
 Envy is an environment variable manager for Docker. It manages `.env` and `compose.yaml` files via a structured
 `env.yaml` manifest — with structure, documentation, validation, and secret auditing built in.
-All env variables are defined in the env.yaml manifest, which generates .env files and compose files as needed. All env variables are always treated as strings to avoid type casting issues with Docker.
+All env variables are defined in the env.yaml manifest, which generates .env files and compose.yaml files as needed. 
+
+All env variables are always treated as strings to avoid type casting issues with Docker and environment variables in general. 
 
 ## Install
 
