@@ -179,7 +179,7 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 			Name:    "worker",
 			Image:   "ghcr.io/example/worker:latest",
 			Command: []string{"celery", "worker"},
-			Sets:  []string{"app"},
+			Sets:    []string{"app"},
 		}},
 		Sets: map[string]Set{
 			"app": {Vars: []Var{{Key: "CELERY_BROKER_URL"}}},
@@ -285,6 +285,33 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	}
 	if set.Vars[0].Default != "production" {
 		t.Fatalf("expected default production, got %q", set.Vars[0].Default)
+	}
+}
+
+func TestManifestLoadServiceScalarSet(t *testing.T) {
+	input := strings.Join([]string{
+		"meta:",
+		"  title: Example",
+		"  version: v1",
+		"services:",
+		"  web:",
+		"    image: ghcr.io/example/web:latest",
+		"    sets: coolify",
+		"sets:",
+		"  coolify:",
+		"    description: Coolify settings",
+	}, "\n")
+
+	var m Manifest
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 1 {
+		t.Fatalf("expected one service, got %+v", m.Services)
+	}
+	if len(m.Services[0].Sets) != 1 || m.Services[0].Sets[0] != "coolify" {
+		t.Fatalf("expected scalar sets value to normalize to [coolify], got %+v", m.Services[0].Sets)
 	}
 }
 
@@ -460,7 +487,7 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 				Name:     "web",
 				Image:    "https://ghcr.io/front-matter/app:latest",
 				Platform: "linux",
-				Sets:   []string{"application"},
+				Sets:     []string{"application"},
 			},
 		},
 		Sets: map[string]Set{
@@ -483,9 +510,9 @@ func TestLintAllowsMissingPlatform(t *testing.T) {
 	m := &Manifest{
 		Services: []Service{
 			{
-				Name:   "web",
-				Image:  "ghcr.io/front-matter/invenio-rdm-starter:latest",
-				Sets: []string{"application"},
+				Name:  "web",
+				Image: "ghcr.io/front-matter/invenio-rdm-starter:latest",
+				Sets:  []string{"application"},
 			},
 		},
 		Sets: map[string]Set{

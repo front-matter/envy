@@ -238,14 +238,42 @@ func (s *Service) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 		case "sets":
-			if err := value.Decode(&out.Sets); err != nil {
+			sets, err := decodeStringSliceOrScalar(value)
+			if err != nil {
 				return err
 			}
+			out.Sets = sets
 		}
 	}
 
 	*s = out
 	return nil
+}
+
+func decodeStringSliceOrScalar(node *yaml.Node) ([]string, error) {
+	if node == nil {
+		return nil, nil
+	}
+
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var items []string
+		if err := node.Decode(&items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	case yaml.ScalarNode:
+		var item string
+		if err := node.Decode(&item); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(item) == "" {
+			return nil, nil
+		}
+		return []string{item}, nil
+	default:
+		return nil, fmt.Errorf("expected string or list of strings, got YAML kind %d", node.Kind)
+	}
 }
 
 func isValidPlatform(value string) bool {
