@@ -27,3 +27,13 @@
 	left: 8px;
 	right: auto;
 }
+
+.content p > a > img {
+	display: inline-block;
+	margin: 0 0.35rem 0 0;
+	vertical-align: middle;
+}
+
+.content p > a:last-child > img {
+	margin-right: 0;
+}

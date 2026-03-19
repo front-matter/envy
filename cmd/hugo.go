@@ -305,6 +305,12 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 		return "", err
 	}
 
+	readmeHome := filepath.Join(siteRoot, "README.md")
+	if err := copyFileIfMissing(readmeHome, filepath.Join(tmpDir, "_index.md")); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+
 	groupsDir := filepath.Join(tmpDir, "groups")
 	if err := os.MkdirAll(groupsDir, 0o755); err != nil {
 		os.RemoveAll(tmpDir)
@@ -357,6 +363,16 @@ func copyFileIfExists(src, dst string) error {
 	}
 
 	return copyFile(src, dst)
+}
+
+func copyFileIfMissing(src, dst string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking destination file %s: %w", dst, err)
+	}
+
+	return copyFileIfExists(src, dst)
 }
 
 func copyDirIfExists(src, dst string) error {

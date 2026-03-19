@@ -170,6 +170,10 @@ func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
 	if err := os.MkdirAll(docsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(docs): %v", err)
 	}
+	readmeHome := "# README Home\n"
+	if err := os.WriteFile(filepath.Join(siteRoot, "README.md"), []byte(readmeHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
 	customHome := "# Custom Docs Home\n"
 	if err := os.WriteFile(filepath.Join(docsDir, "index.md"), []byte(customHome), 0o644); err != nil {
 		t.Fatalf("WriteFile(docs/index.md): %v", err)
@@ -190,6 +194,35 @@ func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
 	}
 	if string(homeContent) != customHome {
 		t.Fatalf("expected docs/index.md to override generated home page, got:\n%s", string(homeContent))
+	}
+
+	if err := os.RemoveAll(contentDir); err != nil {
+		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
+func TestPrepareBuildContentDirUsesReadmeAsHome(t *testing.T) {
+	siteRoot := t.TempDir()
+	readmeHome := "# README Home\n"
+	if err := os.WriteFile(filepath.Join(siteRoot, "README.md"), []byte(readmeHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+
+	m := &manifest.Manifest{
+		Meta: manifest.Meta{Title: "Example"},
+	}
+
+	contentDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+
+	homeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(_index.md): %v", err)
+	}
+	if string(homeContent) != readmeHome {
+		t.Fatalf("expected README.md to be used as home page, got:\n%s", string(homeContent))
 	}
 
 	if err := os.RemoveAll(contentDir); err != nil {
