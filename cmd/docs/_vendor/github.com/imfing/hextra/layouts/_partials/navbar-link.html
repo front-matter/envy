@@ -21,7 +21,7 @@
   <button
     title="{{ or (T $item.Identifier) $item.Name | safeHTML }}"
     data-state="closed"
-    class="hextra-nav-menu-toggle hx:cursor-pointer hx:text-sm hx:contrast-more:text-gray-700 hx:contrast-more:dark:text-gray-100 hx:relative hx:-ml-2 hx:whitespace-nowrap hx:p-2 hx:flex hx:items-center hx:gap-1 {{ $activeClass }}"
+    class="hextra-nav-menu-toggle hx:cursor-pointer hx:text-base hx:font-medium hx:contrast-more:text-gray-700 hx:contrast-more:dark:text-gray-100 hx:relative hx:whitespace-nowrap hx:px-3 hx:py-2 hx:flex hx:items-center hx:gap-2 {{ $activeClass }}"
     type="button"
     aria-label="{{ or (T $item.Identifier) $item.Name | safeHTML }}"
     aria-expanded="false"
@@ -74,7 +74,7 @@
   title="{{ or (T .Identifier) .Name | safeHTML }}"
   href="{{ $link }}"
   {{ if $external }}target="_blank" rel="noreferrer"{{ end }}
-  class="hx:text-sm hx:contrast-more:text-gray-700 hx:contrast-more:dark:text-gray-100 hx:relative hx:-ml-2 hx:hidden hx:whitespace-nowrap hx:p-2 hx:md:inline-flex hx:items-center hx:gap-1 {{ $activeClass }}"
+  class="hx:text-base hx:font-medium hx:contrast-more:text-gray-700 hx:contrast-more:dark:text-gray-100 hx:relative hx:hidden hx:whitespace-nowrap hx:px-3 hx:py-2 hx:md:inline-flex hx:items-center hx:gap-2 {{ $activeClass }}"
 >
   {{- if $icon -}}
   <span class="hx:inline-flex hx:items-center">

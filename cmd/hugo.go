@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/front-matter/envy/manifest"
@@ -238,6 +239,20 @@ func writeTempHugoConfigFromManifest(m *manifest.Manifest, siteDir string) error
 		"module": map[string]interface{}{
 			"imports": []map[string]string{{"path": "github.com/imfing/hextra"}},
 		},
+		"menu": map[string]interface{}{
+			"main": []map[string]interface{}{
+				{
+					"name":   "Search",
+					"weight": 100,
+					"params": map[string]string{"type": "search"},
+				},
+				{
+					"name":   "Theme",
+					"weight": 110,
+					"params": map[string]string{"type": "theme-toggle"},
+				},
+			},
+		},
 	}
 
 	if m.Meta.Docs != "" {
@@ -309,6 +324,18 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 	for _, group := range m.OrderedGroups() {
 		pagePath := filepath.Join(groupsDir, sanitizeGroupPageName(group.Key)+".md")
 		if err := writeFileIfMissing(pagePath, generateGroupMarkdown(m, group)); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", err
+		}
+	}
+
+	if len(m.Services) > 0 {
+		servicesDir := filepath.Join(tmpDir, "services")
+		if err := os.MkdirAll(servicesDir, 0o755); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("creating generated services directory: %w", err)
+		}
+		if err := writeFileIfMissing(filepath.Join(servicesDir, "_index.md"), generateServicesIndexMarkdown(m)); err != nil {
 			os.RemoveAll(tmpDir)
 			return "", err
 		}
@@ -415,40 +442,38 @@ func writeFileIfMissing(path, content string) error {
 
 func generateHomeMarkdown(m *manifest.Manifest) string {
 	var body strings.Builder
+	title := strings.TrimSpace(defaultString(m.Meta.Title, "Configuration Reference"))
+	description := normalizeMarkdownDescription(m.Meta.Description)
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       strings.TrimSpace(defaultString(m.Meta.Title, "Configuration Reference")),
-		"description": strings.TrimSpace(defaultString(m.Meta.Description, "Auto-generated documentation from env.yaml.")),
+		"title":       title,
+		"description": description,
 		"weight":      1,
 	}))
-	body.WriteString(fmt.Sprintf("# %s\n\n", strings.TrimSpace(defaultString(m.Meta.Title, "Configuration Reference"))))
-	if strings.TrimSpace(m.Meta.Description) != "" {
-		body.WriteString(strings.TrimSpace(m.Meta.Description) + "\n\n")
-	} else {
-		body.WriteString("This site is generated from env.yaml during `envy build`.\n\n")
+	if description != "" {
+		body.WriteString(description)
+		if !strings.HasSuffix(description, "\n") {
+			body.WriteString("\n")
+		}
 	}
-	body.WriteString("## Overview\n\n")
-	body.WriteString(fmt.Sprintf("- Groups: %d\n", len(m.Groups)))
-	body.WriteString(fmt.Sprintf("- Variables: %d\n", len(m.AllVars())))
-	if strings.TrimSpace(m.Meta.Docs) != "" {
-		body.WriteString(fmt.Sprintf("- Docs: [%s](%s)\n", m.Meta.Docs, m.Meta.Docs))
-	}
-	body.WriteString("\n## Navigation\n\n")
-	body.WriteString(renderCardsOpen(2))
-	body.WriteString(renderCard("Browse all groups", "/groups/", "folder-open", "Open the generated reference for every env.yaml group."))
-	if strings.TrimSpace(m.Meta.Docs) != "" {
-		body.WriteString(renderCard("Project docs", m.Meta.Docs, "book-open", "Jump to the project or product documentation linked from meta.docs."))
-	}
-	body.WriteString(renderCardsClose())
-	body.WriteString("\n### Group cards\n\n")
-	body.WriteString(renderCardsOpen(3))
-	for _, group := range m.OrderedGroups() {
-		description := strings.TrimSpace(defaultString(group.Description, "Group configuration"))
-		body.WriteString(renderCard(group.Key, "/groups/"+sanitizeGroupPageName(group.Key)+"/", groupIcon(group.Key), description))
-	}
-	body.WriteString(renderCardsClose())
-	body.WriteString("\n")
-	body.WriteString("- [Browse all groups](/groups/)\n")
 	return body.String()
+}
+
+func normalizeMarkdownDescription(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+
+	bulletList := regexp.MustCompile(`\s+([*-])\s+`)
+	description = bulletList.ReplaceAllString(description, "\n$1 ")
+
+	orderedList := regexp.MustCompile(`\s+(\d+\.)\s+`)
+	description = orderedList.ReplaceAllString(description, "\n$1 ")
+
+	listToParagraph := regexp.MustCompile(`(\n(?:[*-]|\d+\.) [^\n]+)\n([A-Z])`)
+	description = listToParagraph.ReplaceAllString(description, "$1\n\n$2")
+
+	return description
 }
 
 func generateGroupsIndexMarkdown(m *manifest.Manifest) string {
@@ -460,17 +485,38 @@ func generateGroupsIndexMarkdown(m *manifest.Manifest) string {
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
 				"name":   "Groups",
-				"weight": 20,
+				"weight": 10,
 			},
 		},
 	}))
-	body.WriteString("# Groups\n\n")
 	body.WriteString("This section is generated from env.yaml during `envy build`.\n\n")
-	body.WriteString("- [Back to home](/)\n\n")
 	body.WriteString(renderCardsOpen(3))
 	for _, group := range m.OrderedGroups() {
 		description := strings.TrimSpace(defaultString(group.Description, "Group configuration"))
 		body.WriteString(renderCard(group.Key, "/groups/"+sanitizeGroupPageName(group.Key)+"/", groupIcon(group.Key), description))
+	}
+	body.WriteString(renderCardsClose())
+	return body.String()
+}
+
+func generateServicesIndexMarkdown(m *manifest.Manifest) string {
+	var body strings.Builder
+	body.WriteString(frontMatterMarkdown(map[string]interface{}{
+		"title":       "Services",
+		"description": "Auto-generated service reference from env.yaml.",
+		"weight":      5,
+		"menu": map[string]interface{}{
+			"main": map[string]interface{}{
+				"name":   "Services",
+				"weight": 5,
+			},
+		},
+	}))
+	body.WriteString("This section is generated from env.yaml during `envy build`.\n\n")
+	body.WriteString(renderCardsOpen(3))
+	for _, service := range m.Services {
+		description := strings.TrimSpace(defaultString(service.Description, service.Name+" service"))
+		body.WriteString(renderCard(service.Name, "#"+service.Name, "serverless", description))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
@@ -483,19 +529,9 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 		"description": strings.TrimSpace(group.Description),
 		"weight":      groupWeight(m, group.Key),
 	}))
-	body.WriteString(fmt.Sprintf("# %s\n\n", group.Key))
-	body.WriteString("- [Home](/)\n")
-	body.WriteString("- [All groups](/groups/)\n\n")
 	if strings.TrimSpace(group.Description) != "" {
 		body.WriteString(strings.TrimSpace(group.Description) + "\n\n")
 	}
-	body.WriteString(renderCardsOpen(2))
-	body.WriteString(renderCard("Back to groups", "/groups/", "folder-open", "Return to the complete group catalog."))
-	if strings.TrimSpace(group.Link) != "" {
-		body.WriteString(renderCard("External documentation", group.Link, "book-open", "Open the upstream docs linked in env.yaml."))
-	}
-	body.WriteString(renderCardsClose())
-	body.WriteString("\n")
 
 	services := servicesForGroup(m, group.Key)
 	if len(services) > 0 {
@@ -507,7 +543,7 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 	}
 
 	if strings.TrimSpace(group.Link) != "" {
-		body.WriteString(fmt.Sprintf("## Documentation\n\n- [%s](%s)\n\n", group.Link, group.Link))
+		body.WriteString(fmt.Sprintf("## Documentation\n\n![Documentation](/images/readme.svg) [%s](%s)\n\n", group.Link, group.Link))
 	}
 
 	body.WriteString("## Variables\n\n")
@@ -518,7 +554,8 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 	for _, variable := range group.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		body.WriteString(renderCard(variable.Key, "#"+variableHeadingAnchor(variable.Key), "tag", variableCardSubtitle(variable)))
+		tag, tagColor := variableCardTag(variable)
+		body.WriteString(renderCardWithTag(variable.Key, "#"+variableHeadingAnchor(variable.Key), "env", variableCardSubtitle(variable), tag, tagColor))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
@@ -564,77 +601,79 @@ func renderCardsClose() string {
 }
 
 func renderCard(title, link, icon, description string) string {
-	if strings.TrimSpace(description) != "" {
-		return fmt.Sprintf(
-			"{{< card link=\"%s\" title=\"%s\" icon=\"%s\" subtitle=\"%s\" >}}\n",
-			escapeShortcodeValue(link),
-			escapeShortcodeValue(title),
-			escapeShortcodeValue(icon),
-			escapeShortcodeValue(description),
-		)
-	}
+	return renderCardWithTag(title, link, icon, description, "", "")
+}
 
-	return fmt.Sprintf(
-		"{{< card link=\"%s\" title=\"%s\" icon=\"%s\" >}}\n",
+func renderCardWithTag(title, link, icon, description, tag, tagColor string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("{{< card link=\"%s\" title=\"%s\" icon=\"%s\"",
 		escapeShortcodeValue(link),
 		escapeShortcodeValue(title),
 		escapeShortcodeValue(icon),
-	)
+	))
+	if strings.TrimSpace(description) != "" {
+		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+	}
+	if tag != "" {
+		sb.WriteString(fmt.Sprintf(" tag=\"%s\"", escapeShortcodeValue(tag)))
+		if tagColor != "" {
+			sb.WriteString(fmt.Sprintf(" tagColor=\"%s\"", escapeShortcodeValue(tagColor)))
+		}
+	}
+	sb.WriteString(" >}}\n")
+	return sb.String()
 }
 
 func escapeShortcodeValue(value string) string {
 	return strings.ReplaceAll(value, "\"", "\\\"")
 }
 
-func groupIcon(groupKey string) string {
-	switch strings.ToLower(strings.TrimSpace(groupKey)) {
-	case "authentication":
-		return "shield-check"
-	case "cache":
-		return "bolt"
-	case "db":
-		return "circle-stack"
-	case "doi":
-		return "finger-print"
-	case "mail":
-		return "envelope"
-	case "s3":
-		return "cloud-arrow-up"
-	case "search":
-		return "magnifying-glass"
-	case "web":
-		return "globe-alt"
-	default:
-		return "cog-6-tooth"
+func escapeShortcodeRawValue(value string) string {
+	return strings.ReplaceAll(value, "`", "'")
+}
+
+func groupIcon(_ string) string {
+	return "folder"
+}
+
+func variableCardTag(variable manifest.Var) (string, string) {
+	if variable.IsSecret() {
+		return "secret", "yellow"
 	}
+	return "", ""
 }
 
 func variableCardSubtitle(variable manifest.Var) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	if strings.TrimSpace(variable.Description) != "" {
 		parts = append(parts, strings.TrimSpace(variable.Description))
 	}
+
+	meta := make([]string, 0, 2)
 	if variable.IsRequired() {
-		parts = append(parts, "Required")
+		meta = append(meta, "Required")
 	}
-	if variable.IsSecret() {
-		parts = append(parts, "Secret")
+	if len(meta) > 0 {
+		parts = append(parts, strings.Join(meta, " · "))
 	}
+
 	defaultValue := strings.TrimSpace(variable.DefaultString())
 	if defaultValue != "" {
 		if variable.IsSecret() {
 			parts = append(parts, "Default hidden")
 		} else {
-			parts = append(parts, "Default: `"+defaultValue+"`")
+			indentedDefault := "    " + strings.ReplaceAll(defaultValue, "\n", "\n    ")
+			parts = append(parts, indentedDefault)
 		}
 	}
+
 	if strings.TrimSpace(variable.Example) != "" {
 		parts = append(parts, "Example: `"+strings.TrimSpace(variable.Example)+"`")
 	}
 	if len(parts) == 0 {
 		return "Variable definition"
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, "\n\n")
 }
 
 func variableHeadingAnchor(key string) string {

@@ -19,10 +19,8 @@
 
 {{- $external := strings.HasPrefix $link "http" -}}
 {{- $href := cond (strings.HasPrefix $link "/") ($link | relURL) $link -}}
-
-
 <a
-  class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 {{ $linkClass }}"
+  class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 hx:relative {{ $linkClass }}"
   {{- if $link -}}
     href="{{ $href }}"
     {{ with $external }}target="_blank" rel="noreferrer"{{ end -}}
@@ -46,22 +44,30 @@
     {{- $padding = "hx:pt-4 hx:px-4" -}}
   {{- end -}}
 
-  <div class="hx:mt-auto">
-    <span class="hextra-card-icon hx:flex hx:font-semibold hx:items-start hx:gap-2 {{ $padding }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50">
+  <div>
+    <span class="hextra-card-icon hx:flex hx:font-semibold hx:items-center hx:gap-2 {{ $padding }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50">
       {{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon) -}}{{- end -}}
       {{- $title -}}
     </span>
     {{- with $subtitle -}}
-      <div class="hextra-card-subtitle hx:line-clamp-3 hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2">{{- $subtitle | markdownify -}}</div>
+      {{- $subtitleClass := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-4 hx:mt-2" -}}
+      {{- if and (not (in $subtitle "\n\n")) (not (in $subtitle "<pre>")) (not (in $subtitle "<br><br>")) (not (strings.HasPrefix $subtitle "    ")) (not (in $subtitle "\n    ")) -}}
+        {{- $subtitleClass = printf "%s %s" $subtitleClass "hx:line-clamp-3" -}}
+      {{- end -}}
+      <div class="{{ $subtitleClass }}">{{- $subtitle | markdownify -}}</div>
     {{- end -}}
   </div>
 
   {{- if $tag }}
+    {{- $tagClass := "hextra-card-tag" -}}
+    {{- if eq $tag "secret" -}}
+      {{- $tagClass = "hextra-card-tag hextra-card-tag-secret" -}}
+    {{- end -}}
     {{- partial "shortcodes/badge.html" (dict
       "content" $tag
       "color" $tagColor
-      "class" "hextra-card-tag"
-      "border" $tagBorder
+      "class" $tagClass
+      "border" true
       "icon" $tagIcon
       )
     -}}

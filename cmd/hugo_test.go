@@ -21,7 +21,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 
 	m := &manifest.Manifest{
-		Meta:     manifest.Meta{Title: "Example", Version: "v1"},
+		Meta:     manifest.Meta{Title: "Example", Description: "Example description", Version: "v1"},
 		Services: []manifest.Service{{Name: "web", Groups: []string{"common"}}},
 		Groups: map[string]manifest.Group{
 			"common": {
@@ -64,7 +64,15 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("ReadFile(_index.md): %v", err)
 	}
 	homeChecks := []string{
-		"# Example",
+		"Example description",
+	}
+	for _, check := range homeChecks {
+		if !strings.Contains(string(homeContent), check) {
+			t.Fatalf("expected generated home page to contain %q, got:\n%s", check, string(homeContent))
+		}
+	}
+
+	homeNotChecks := []string{
 		"## Overview",
 		"## Navigation",
 		"[Browse all groups](/groups/)",
@@ -74,9 +82,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"title=\"common\"",
 		"/groups/common/",
 	}
-	for _, check := range homeChecks {
-		if !strings.Contains(string(homeContent), check) {
-			t.Fatalf("expected generated home page to contain %q, got:\n%s", check, string(homeContent))
+	for _, check := range homeNotChecks {
+		if strings.Contains(string(homeContent), check) {
+			t.Fatalf("expected generated home page to not contain %q, got:\n%s", check, string(homeContent))
 		}
 	}
 
@@ -85,11 +93,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("ReadFile(groups/common.md): %v", err)
 	}
 	checks := []string{
-		"# common",
-		"- [Home](/)",
-		"- [All groups](/groups/)",
-		"title=\"Back to groups\"",
-		"title=\"External documentation\"",
 		"Shared settings for runtime services.",
 		"## Services",
 		"- web",
@@ -103,6 +106,21 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
 			t.Fatalf("expected generated group page to contain %q, got:\n%s", check, string(groupContent))
+		}
+	}
+
+	servicesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "services", "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(services/_index.md): %v", err)
+	}
+	servicesChecks := []string{
+		"title: Services",
+		"name: Services",
+		"title=\"web\"",
+	}
+	for _, check := range servicesChecks {
+		if !strings.Contains(string(servicesIndexContent), check) {
+			t.Fatalf("expected generated services index to contain %q, got:\n%s", check, string(servicesIndexContent))
 		}
 	}
 
@@ -232,5 +250,38 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	imports, ok := module["imports"].([]interface{})
 	if !ok || len(imports) == 0 {
 		t.Fatalf("expected non-empty module.imports, got: %#v", module["imports"])
+	}
+
+	menu, ok := got["menu"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
+	}
+	mainMenu, ok := menu["main"].([]interface{})
+	if !ok || len(mainMenu) < 2 {
+		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
+	}
+
+	firstMenuItem, ok := mainMenu[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first menu item to be map, got: %#v", mainMenu[0])
+	}
+	if firstMenuItem["name"] != "Search" {
+		t.Fatalf("expected first config menu item to be Search, got: %#v", firstMenuItem["name"])
+	}
+	params, ok := firstMenuItem["params"].(map[string]interface{})
+	if !ok || params["type"] != "search" {
+		t.Fatalf("expected first menu item params.type to be search, got: %#v", firstMenuItem["params"])
+	}
+
+	secondMenuItem, ok := mainMenu[1].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected second menu item to be map, got: %#v", mainMenu[1])
+	}
+	if secondMenuItem["name"] != "Theme" {
+		t.Fatalf("expected second config menu item to be Theme, got: %#v", secondMenuItem["name"])
+	}
+	themeParams, ok := secondMenuItem["params"].(map[string]interface{})
+	if !ok || themeParams["type"] != "theme-toggle" {
+		t.Fatalf("expected second menu item params.type to be theme-toggle, got: %#v", secondMenuItem["params"])
 	}
 }

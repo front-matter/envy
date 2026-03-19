@@ -1,6 +1,6 @@
 {{- $enableFooterSwitches := .Store.Get "enableFooterSwitches" | default false -}}
 {{- $displayThemeToggle := site.Params.theme.displayToggle | default true -}}
-{{- $footerSwitchesVisible := and $enableFooterSwitches (or hugo.IsMultilingual $displayThemeToggle) -}}
+{{- $footerSwitchesVisible := and $enableFooterSwitches hugo.IsMultilingual -}}
 {{- $copyrightSectionVisible := or (.Site.Params.footer.displayPoweredBy | default true) .Site.Params.footer.displayCopyright -}}
 
 {{- $copyright := (T "copyright") | default "© 2024 Hextra." -}}
@@ -11,9 +11,8 @@
   {{- if $footerSwitchesVisible -}}
     <div class="hx:mx-auto hx:flex hx:gap-2 hx:py-2 hx:px-4 hextra-max-footer-width">
       {{- partial "language-switch.html" (dict "context" .) -}}
-      {{- with $displayThemeToggle }}{{ partial "theme-toggle.html" }}{{ end -}}
     </div>
-    {{- if or hugo.IsMultilingual $displayThemeToggle -}}
+    {{- if hugo.IsMultilingual -}}
       <hr class="hx:border-gray-200 hx:dark:border-neutral-800" />
     {{- end -}}
   {{- end -}}
