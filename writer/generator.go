@@ -23,12 +23,12 @@ func Generate(m *manifest.Manifest, opts Options) string {
 	sb.WriteString(fmt.Sprintf("# Docs: %s\n", m.Meta.Docs))
 	sb.WriteString("\n")
 
-	for _, group := range m.OrderedGroups() {
-		dashes := strings.Repeat("─", dashWidth(group.Key))
-		sb.WriteString(fmt.Sprintf("# ── %s %s\n", group.Key, dashes))
-		sb.WriteString(fmt.Sprintf("# %s\n", group.Description))
+	for _, set := range m.OrderedSets() {
+		dashes := strings.Repeat("─", dashWidth(set.Key))
+		sb.WriteString(fmt.Sprintf("# ── %s %s\n", set.Key, dashes))
+		sb.WriteString(fmt.Sprintf("# %s\n", set.Description))
 
-		for _, v := range group.Vars {
+		for _, v := range set.Vars {
 			if !v.IsEditable() {
 				continue
 			}

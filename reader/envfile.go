@@ -19,7 +19,7 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("env file %s has no variables", path)
 	}
 
-	// All .env variables go into a single "env" group
+	// All .env variables go into a single "env" set.
 	vars := make([]manifest.Var, 0, len(env.Keys))
 
 	for _, key := range env.Keys {
@@ -43,7 +43,7 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 			LanguageCode: "en-US",
 			Version:      "v1",
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"env": {
 				Description: "Imported from .env file",
 				Vars:        vars,

@@ -22,8 +22,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 
 	m := &manifest.Manifest{
 		Meta:     manifest.Meta{Title: "Example", Description: "Example description", Version: "v1"},
-		Services: []manifest.Service{{Name: "web", Groups: []string{"common"}}},
-		Groups: map[string]manifest.Group{
+		Services: []manifest.Service{{Name: "web", Sets: []string{"common"}}},
+		Sets: map[string]manifest.Set{
 			"common": {
 				Description: "Shared settings for runtime services.",
 				Link:        "https://example.org/common",
@@ -45,18 +45,18 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("expected copied content file, got %q", string(aboutContent))
 	}
 
-	indexContent, err := os.ReadFile(filepath.Join(contentDir, "groups", "_index.md"))
+	indexContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "_index.md"))
 	if err != nil {
-		t.Fatalf("ReadFile(groups/_index.md): %v", err)
+		t.Fatalf("ReadFile(sets/_index.md): %v", err)
 	}
 	if !strings.Contains(string(indexContent), "title=\"common\"") {
-		t.Fatalf("expected generated groups index to render a card for common, got:\n%s", string(indexContent))
+		t.Fatalf("expected generated sets index to render a card for common, got:\n%s", string(indexContent))
 	}
-	if !strings.Contains(string(indexContent), "name: Groups") {
-		t.Fatalf("expected generated groups index to include menu metadata, got:\n%s", string(indexContent))
+	if !strings.Contains(string(indexContent), "name: Sets") {
+		t.Fatalf("expected generated sets index to include menu metadata, got:\n%s", string(indexContent))
 	}
 	if !strings.Contains(string(indexContent), "{{< cards cols=\"3\" >}}") {
-		t.Fatalf("expected generated groups index to include cards shortcode, got:\n%s", string(indexContent))
+		t.Fatalf("expected generated sets index to include cards shortcode, got:\n%s", string(indexContent))
 	}
 
 	homeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.md"))
@@ -75,12 +75,12 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	homeNotChecks := []string{
 		"## Overview",
 		"## Navigation",
-		"[Browse all groups](/groups/)",
+		"[Browse all sets](/sets/)",
 		"{{< cards cols=\"2\" >}}",
 		"{{< cards cols=\"3\" >}}",
-		"title=\"Browse all groups\"",
+		"title=\"Browse all sets\"",
 		"title=\"common\"",
-		"/groups/common/",
+		"/sets/common/",
 	}
 	for _, check := range homeNotChecks {
 		if strings.Contains(string(homeContent), check) {
@@ -88,9 +88,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		}
 	}
 
-	groupContent, err := os.ReadFile(filepath.Join(contentDir, "groups", "common.md"))
+	groupContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "common.md"))
 	if err != nil {
-		t.Fatalf("ReadFile(groups/common.md): %v", err)
+		t.Fatalf("ReadFile(sets/common.md): %v", err)
 	}
 	checks := []string{
 		"Shared settings for runtime services.",
@@ -105,7 +105,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
-			t.Fatalf("expected generated group page to contain %q, got:\n%s", check, string(groupContent))
+			t.Fatalf("expected generated set page to contain %q, got:\n%s", check, string(groupContent))
 		}
 	}
 
@@ -131,9 +131,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 
 func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 	siteRoot := t.TempDir()
-	groupDir := filepath.Join(siteRoot, "content", "groups")
+	groupDir := filepath.Join(siteRoot, "content", "sets")
 	if err := os.MkdirAll(groupDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(groups): %v", err)
+		t.Fatalf("MkdirAll(sets): %v", err)
 	}
 	customPage := "# Custom\n"
 	if err := os.WriteFile(filepath.Join(groupDir, "common.md"), []byte(customPage), 0o644); err != nil {
@@ -141,7 +141,7 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 	}
 
 	m := &manifest.Manifest{
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"common": {Description: "Shared settings."},
 		},
 	}
@@ -151,12 +151,12 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 		t.Fatalf("prepareBuildContentDir(): %v", err)
 	}
 
-	groupContent, err := os.ReadFile(filepath.Join(contentDir, "groups", "common.md"))
+	groupContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "common.md"))
 	if err != nil {
-		t.Fatalf("ReadFile(groups/common.md): %v", err)
+		t.Fatalf("ReadFile(sets/common.md): %v", err)
 	}
 	if string(groupContent) != customPage {
-		t.Fatalf("expected existing group page to be preserved, got:\n%s", string(groupContent))
+		t.Fatalf("expected existing set page to be preserved, got:\n%s", string(groupContent))
 	}
 
 	if err := os.RemoveAll(contentDir); err != nil {

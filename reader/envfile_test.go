@@ -30,13 +30,13 @@ DATABASE_URL=postgres://localhost/mydb
 		t.Errorf("expected 'Imported Env Manifest', got %s", m.Meta.Title)
 	}
 
-	group, ok := m.Groups["env"]
+	set, ok := m.Sets["env"]
 	if !ok {
-		t.Error("expected 'env' group")
+		t.Error("expected 'env' set")
 	}
 
-	if len(group.Vars) != 3 {
-		t.Errorf("expected 3 variables, got %d", len(group.Vars))
+	if len(set.Vars) != 3 {
+		t.Errorf("expected 3 variables, got %d", len(set.Vars))
 	}
 }
 
@@ -83,8 +83,8 @@ EMPTY_VALUE=
 		t.Fatalf("ImportEnvFile failed: %v", err)
 	}
 
-	group := m.Groups["env"]
-	for _, v := range group.Vars {
+	set := m.Sets["env"]
+	for _, v := range set.Vars {
 		if v.Default != "" {
 			t.Errorf("%s: expected secret defaults to be empty, got %q", v.Key, v.Default)
 		}
@@ -110,17 +110,17 @@ func TestImportEnvFileEnvLocal(t *testing.T) {
 		t.Fatalf("ImportEnvFile(.env.local) failed: %v", err)
 	}
 
-	group, ok := m.Groups["env"]
+	set, ok := m.Sets["env"]
 	if !ok {
-		t.Error("expected 'env' group")
+		t.Error("expected 'env' set")
 	}
 
-	if len(group.Vars) != 1 {
-		t.Errorf("expected 1 variable, got %d", len(group.Vars))
+	if len(set.Vars) != 1 {
+		t.Errorf("expected 1 variable, got %d", len(set.Vars))
 	}
 
-	if group.Vars[0].Key != "LOCAL_VAR" {
-		t.Errorf("expected variable LOCAL_VAR, got %s", group.Vars[0].Key)
+	if set.Vars[0].Key != "LOCAL_VAR" {
+		t.Errorf("expected variable LOCAL_VAR, got %s", set.Vars[0].Key)
 	}
 }
 
@@ -144,11 +144,11 @@ BANANA=b
 		t.Fatalf("ImportEnvFile failed: %v", err)
 	}
 
-	group := m.Groups["env"]
+	set := m.Sets["env"]
 
 	// Verify variables are sorted
 	expected := []string{"APPLE", "BANANA", "MONKEY", "ZEBRA"}
-	for i, v := range group.Vars {
+	for i, v := range set.Vars {
 		if v.Key != expected[i] {
 			t.Errorf("variable %d: expected %s, got %s", i, expected[i], v.Key)
 		}

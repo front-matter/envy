@@ -22,10 +22,10 @@ func TestGenerateComposeIncludesCommentsAndLists(t *testing.T) {
 				Description: "Background worker",
 				Entrypoint:  []string{"/entrypoint.sh"},
 				Command:     []string{"celery", "worker"},
-				Groups:      []string{"application"},
+				Sets:      []string{"application"},
 			},
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {
 				Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}},
 			},
@@ -113,9 +113,9 @@ func TestGenerateComposeIncludesCoolifyLabel(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:   "worker",
 			Image:  "ghcr.io/example/worker:latest",
-			Groups: []string{"application"},
+			Sets: []string{"application"},
 		}},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {},
 		},
 	}
@@ -130,10 +130,10 @@ func TestGenerateComposeIncludesCoolifyLabel(t *testing.T) {
 func TestGenerateComposeExcludesServices(t *testing.T) {
 	m := &manifest.Manifest{
 		Services: []manifest.Service{
-			{Name: "web", Image: "ghcr.io/example/web:latest", Groups: []string{"application"}},
-			{Name: "db", Image: "postgres:17", Groups: []string{"database"}},
+			{Name: "web", Image: "ghcr.io/example/web:latest", Sets: []string{"application"}},
+			{Name: "db", Image: "postgres:17", Sets: []string{"database"}},
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}}},
 			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: "app"}}},
 		},
@@ -152,10 +152,10 @@ func TestGenerateComposeExcludesServices(t *testing.T) {
 func TestGenerateComposeExcludesSelectedService(t *testing.T) {
 	m := &manifest.Manifest{
 		Services: []manifest.Service{
-			{Name: "web", Image: "ghcr.io/example/web:latest", Groups: []string{"application"}},
-			{Name: "db", Image: "postgres:17", Groups: []string{"database"}},
+			{Name: "web", Image: "ghcr.io/example/web:latest", Sets: []string{"application"}},
+			{Name: "db", Image: "postgres:17", Sets: []string{"database"}},
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {Vars: []manifest.Var{{Key: "APP_ENV", Default: "production"}}},
 			"database":    {Vars: []manifest.Var{{Key: "DB_NAME", Default: "app"}}},
 		},
@@ -179,9 +179,9 @@ func TestGenerateComposeOmitsSecretVars(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:   "web",
 			Image:  "ghcr.io/example/web:latest",
-			Groups: []string{"application"},
+			Sets: []string{"application"},
 		}},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {
 				Description: "App settings",
 				Vars: []manifest.Var{
@@ -201,7 +201,7 @@ func TestGenerateComposeOmitsSecretVars(t *testing.T) {
 		t.Fatalf("compose output should omit secret vars\n%s", compose)
 	}
 	if !strings.Contains(compose, "# ── application") {
-		t.Fatalf("compose output missing group header for visible vars\n%s", compose)
+		t.Fatalf("compose output missing set header for visible vars\n%s", compose)
 	}
 	if strings.Contains(compose, "changeme") {
 		t.Fatalf("compose output should not contain secret default values\n%s", compose)
@@ -213,9 +213,9 @@ func TestGenerateComposeEditableAndRequiredOutput(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:   "web",
 			Image:  "ghcr.io/example/web:latest",
-			Groups: []string{"application"},
+			Sets: []string{"application"},
 		}},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"application": {
 				Vars: []manifest.Var{
 					{Key: "EDITABLE_OPT", Default: "opt", Editable: "true", Required: "false"},

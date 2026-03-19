@@ -35,20 +35,20 @@ APP_NAME=TestApp
 		t.Errorf("expected name 'Imported Env Manifest', got %s", m.Meta.Title)
 	}
 
-	if len(m.Groups) != 1 {
-		t.Errorf("expected 1 group, got %d", len(m.Groups))
+	if len(m.Sets) != 1 {
+		t.Errorf("expected 1 set, got %d", len(m.Sets))
 	}
 
-	group, ok := m.Groups["env"]
+	set, ok := m.Sets["env"]
 	if !ok {
-		t.Errorf("expected 'env' group")
+		t.Errorf("expected 'env' set")
 	}
 
-	if len(group.Vars) != 5 {
-		t.Errorf("expected 5 vars, got %d", len(group.Vars))
+	if len(set.Vars) != 5 {
+		t.Errorf("expected 5 vars, got %d", len(set.Vars))
 	}
 
-	for _, v := range group.Vars {
+	for _, v := range set.Vars {
 		if v.Key == "APP_NAME" && v.Default != "" {
 			t.Errorf("expected APP_NAME default to be empty for secret var, got %s", v.Default)
 		}
@@ -58,7 +58,7 @@ APP_NAME=TestApp
 func TestMergeManifests(t *testing.T) {
 	env1 := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "env1", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"db": {
 				Vars: []manifest.Var{
 					{Key: "DB_HOST", Default: "localhost"},
@@ -73,7 +73,7 @@ func TestMergeManifests(t *testing.T) {
 		Services: []manifest.Service{
 			{Name: "web", Image: "nginx:latest"},
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"web": {
 				Vars: []manifest.Var{
 					{Key: "APP_NAME", Default: "myapp"},
@@ -94,13 +94,13 @@ func TestMergeManifests(t *testing.T) {
 		t.Errorf("expected 1 service in merged manifest, got %d", len(merged.Services))
 	}
 
-	if len(merged.Groups) != 2 {
-		t.Errorf("expected 2 groups in merged manifest, got %d", len(merged.Groups))
+	if len(merged.Sets) != 2 {
+		t.Errorf("expected 2 sets in merged manifest, got %d", len(merged.Sets))
 	}
 
-	dbGroup := merged.Groups["db"]
+	dbGroup := merged.Sets["db"]
 	if len(dbGroup.Vars) != 3 {
-		t.Errorf("expected 3 vars in db group after merge, got %d", len(dbGroup.Vars))
+		t.Errorf("expected 3 vars in db set after merge, got %d", len(dbGroup.Vars))
 	}
 
 	// Check that env2's version of DB_HOST (db.example.com) is used
@@ -114,7 +114,7 @@ func TestMergeManifests(t *testing.T) {
 func TestMergeEmptyManifests(t *testing.T) {
 	m1 := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "m1", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "SETTING_1"},
@@ -128,8 +128,8 @@ func TestMergeEmptyManifests(t *testing.T) {
 		t.Error("Merge must return non-nil manifest")
 	}
 
-	if len(merged.Groups["app"].Vars) != 1 {
-		t.Errorf("expected 1 var in app group, got %d", len(merged.Groups["app"].Vars))
+	if len(merged.Sets["app"].Vars) != 1 {
+		t.Errorf("expected 1 var in app set, got %d", len(merged.Sets["app"].Vars))
 	}
 
 	// Test merge with no manifests
@@ -137,15 +137,15 @@ func TestMergeEmptyManifests(t *testing.T) {
 	if emptyMerge == nil {
 		t.Error("Merge with no args should return empty manifest, not nil")
 	}
-	if len(emptyMerge.Groups) != 0 {
-		t.Errorf("empty merge should have no groups, got %d", len(emptyMerge.Groups))
+	if len(emptyMerge.Sets) != 0 {
+		t.Errorf("empty merge should have no sets, got %d", len(emptyMerge.Sets))
 	}
 }
 
 func TestMergeThreeManifests(t *testing.T) {
 	m1 := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "m1", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "VAR_1", Default: "value1"},
@@ -156,7 +156,7 @@ func TestMergeThreeManifests(t *testing.T) {
 
 	m2 := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "m2", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "VAR_2", Default: "value2"},
@@ -167,7 +167,7 @@ func TestMergeThreeManifests(t *testing.T) {
 
 	m3 := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "m3", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "VAR_1", Default: "value1_updated"},
@@ -179,7 +179,7 @@ func TestMergeThreeManifests(t *testing.T) {
 
 	merged := Merge(m1, m2, m3)
 
-	appGroup := merged.Groups["app"]
+	appGroup := merged.Sets["app"]
 	if len(appGroup.Vars) != 3 {
 		t.Errorf("expected 3 vars after merging 3 manifests, got %d", len(appGroup.Vars))
 	}
@@ -192,13 +192,13 @@ func TestMergeThreeManifests(t *testing.T) {
 	}
 }
 
-func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
+func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
 	compose := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "compose", Version: "v1"},
 		Services: []manifest.Service{
-			{Name: "web", Groups: []string{"web"}},
+			{Name: "web", Sets: []string{"web"}},
 		},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"web": {
 				Vars: []manifest.Var{
 					{Key: "APP_ENV", Default: "production"},
@@ -210,7 +210,7 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 
 	envFile := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "env", Version: "v1"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"env": {
 				Vars: []manifest.Var{
 					{Key: "APP_ENV", Default: "local"},
@@ -222,15 +222,15 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 
 	merged := Merge(compose, envFile)
 
-	envGroup := merged.Groups["env"]
+	envGroup := merged.Sets["env"]
 	if len(envGroup.Vars) != 1 {
 		t.Fatalf("expected only 1 env var after dedupe, got %d", len(envGroup.Vars))
 	}
 	if envGroup.Vars[0].Key != "EXTRA_ONLY" {
-		t.Fatalf("expected EXTRA_ONLY to remain in env group, got %s", envGroup.Vars[0].Key)
+		t.Fatalf("expected EXTRA_ONLY to remain in env set, got %s", envGroup.Vars[0].Key)
 	}
 
-	webGroup := merged.Groups["web"]
+	webGroup := merged.Sets["web"]
 	for _, v := range webGroup.Vars {
 		if v.Key == "APP_ENV" && v.Default != "production" {
 			t.Fatalf("expected compose APP_ENV to be preserved, got %s", v.Default)

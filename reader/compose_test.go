@@ -77,11 +77,11 @@ networks:
 		t.Fatalf("expected 2 services, got %d", len(m.Services))
 	}
 
-	if _, ok := m.Groups["web"]; !ok {
-		t.Fatalf("expected web group")
+	if _, ok := m.Sets["web"]; !ok {
+		t.Fatalf("expected web set")
 	}
-	if _, ok := m.Groups["worker"]; !ok {
-		t.Fatalf("expected worker group")
+	if _, ok := m.Sets["worker"]; !ok {
+		t.Fatalf("expected worker set")
 	}
 
 	if len(m.Volumes) != 2 || m.Volumes[0] != "postgres_data" || m.Volumes[1] != "redis_data" {
@@ -90,6 +90,35 @@ networks:
 
 	if len(m.Networks) != 2 || m.Networks[0] != "backend" || m.Networks[1] != "frontend" {
 		t.Fatalf("expected networks [backend frontend], got %v", m.Networks)
+	}
+}
+
+func TestImportComposeAllowsPWDBindMountWithoutNamedVolume(t *testing.T) {
+	tmp := t.TempDir()
+	composePath := filepath.Join(tmp, "compose.yaml")
+
+	compose := `services:
+  ghost:
+    image: ghost:latest
+    volumes:
+      - $PWD/ghost/volumes/config.production.json:/var/lib/ghost/config.production.json
+`
+
+	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+		t.Fatalf("write compose file: %v", err)
+	}
+
+	m, err := ImportCompose(composePath)
+	if err != nil {
+		t.Fatalf("ImportCompose() error = %v", err)
+	}
+
+	if m == nil {
+		t.Fatalf("expected non-nil manifest")
+	}
+
+	if len(m.Services) != 1 || m.Services[0].Name != "ghost" {
+		t.Fatalf("expected one imported service named ghost, got %#v", m.Services)
 	}
 }
 
@@ -207,7 +236,7 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 		t.Fatalf("ImportCompose() error = %v", err)
 	}
 
-	webGroup := m.Groups["web"]
+	webGroup := m.Sets["web"]
 	vars := webGroup.Vars
 
 	// Find and verify the secret vars
@@ -278,33 +307,33 @@ func TestImportComposeConsolidatesDuplicateVarsIntoCommonGroup(t *testing.T) {
 		t.Fatalf("ImportCompose() error = %v", err)
 	}
 
-	commonGroup, ok := m.Groups["common"]
+	commonGroup, ok := m.Sets["common"]
 	if !ok {
-		t.Fatalf("expected common group to be created")
+		t.Fatalf("expected common set to be created")
 	}
 	if len(commonGroup.Vars) != 1 || commonGroup.Vars[0].Key != "APP_ENV" {
-		t.Fatalf("expected APP_ENV in common group, got %+v", commonGroup.Vars)
+		t.Fatalf("expected APP_ENV in common set, got %+v", commonGroup.Vars)
 	}
 
-	webGroup := m.Groups["web"]
+	webGroup := m.Sets["web"]
 	if len(webGroup.Vars) != 1 || webGroup.Vars[0].Key != "LOG_LEVEL" {
-		t.Fatalf("expected LOG_LEVEL to remain in web group, got %+v", webGroup.Vars)
+		t.Fatalf("expected LOG_LEVEL to remain in web set, got %+v", webGroup.Vars)
 	}
 
-	workerGroup := m.Groups["worker"]
+	workerGroup := m.Sets["worker"]
 	if len(workerGroup.Vars) != 1 || workerGroup.Vars[0].Key != "WORKER_CONCURRENCY" {
-		t.Fatalf("expected WORKER_CONCURRENCY to remain in worker group, got %+v", workerGroup.Vars)
+		t.Fatalf("expected WORKER_CONCURRENCY to remain in worker set, got %+v", workerGroup.Vars)
 	}
 
-	if len(m.Services[0].Groups) != 2 || m.Services[0].Groups[0] != "common" {
-		t.Fatalf("expected first service to include common group, got %+v", m.Services[0].Groups)
+	if len(m.Services[0].Sets) != 2 || m.Services[0].Sets[0] != "common" {
+		t.Fatalf("expected first service to include common set, got %+v", m.Services[0].Sets)
 	}
-	if len(m.Services[1].Groups) != 2 || m.Services[1].Groups[0] != "common" {
-		t.Fatalf("expected second service to include common group, got %+v", m.Services[1].Groups)
+	if len(m.Services[1].Sets) != 2 || m.Services[1].Sets[0] != "common" {
+		t.Fatalf("expected second service to include common set, got %+v", m.Services[1].Sets)
 	}
 }
 
-func TestImportComposeKeepsConflictingDuplicateVarsInServiceGroups(t *testing.T) {
+func TestImportComposeKeepsConflictingDuplicateVarsInServiceSets(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
@@ -328,13 +357,13 @@ func TestImportComposeKeepsConflictingDuplicateVarsInServiceGroups(t *testing.T)
 		t.Fatalf("ImportCompose() error = %v", err)
 	}
 
-	if _, ok := m.Groups["common"]; ok {
-		t.Fatalf("did not expect common group for conflicting duplicate vars")
+	if _, ok := m.Sets["common"]; ok {
+		t.Fatalf("did not expect common set for conflicting duplicate vars")
 	}
-	if len(m.Groups["web"].Vars) != 1 || m.Groups["web"].Vars[0].Key != "APP_ENV" {
-		t.Fatalf("expected APP_ENV to remain in web group, got %+v", m.Groups["web"].Vars)
+	if len(m.Sets["web"].Vars) != 1 || m.Sets["web"].Vars[0].Key != "APP_ENV" {
+		t.Fatalf("expected APP_ENV to remain in web set, got %+v", m.Sets["web"].Vars)
 	}
-	if len(m.Groups["worker"].Vars) != 1 || m.Groups["worker"].Vars[0].Key != "APP_ENV" {
-		t.Fatalf("expected APP_ENV to remain in worker group, got %+v", m.Groups["worker"].Vars)
+	if len(m.Sets["worker"].Vars) != 1 || m.Sets["worker"].Vars[0].Key != "APP_ENV" {
+		t.Fatalf("expected APP_ENV to remain in worker set, got %+v", m.Sets["worker"].Vars)
 	}
 }

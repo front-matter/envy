@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -208,8 +210,8 @@ func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	if strings.Contains(output, "secret:") {
 		t.Fatalf("expected no secret fields in generated env.yaml, got:\n%s", output)
 	}
-	if strings.Contains(output, "groups:") {
-		t.Fatalf("expected groups section to be omitted when all vars are secret, got:\n%s", output)
+	if strings.Contains(output, "sets:") {
+		t.Fatalf("expected sets section to be omitted when all vars are secret, got:\n%s", output)
 	}
 	if !strings.Contains(output, "meta:") {
 		t.Fatalf("expected meta section in generated env.yaml, got:\n%s", output)
@@ -221,9 +223,9 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
-			Groups:  []string{"worker"},
+			Sets:  []string{"worker"},
 		}},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"worker": {
 				Vars: []manifest.Var{{Key: "BROKER_URL"}},
 			},
@@ -240,9 +242,9 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
-			Groups:  []string{"worker"},
+			Sets:  []string{"worker"},
 		}},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"worker": {
 				Vars: []manifest.Var{{Key: "OTHER_VAR"}},
 			},
@@ -260,5 +262,40 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 	}
 	if !strings.Contains(message, "service \"worker\"") {
 		t.Fatalf("expected service name in warning, got %q", message)
+	}
+}
+
+func TestResolveImportPathsURL(t *testing.T) {
+	url := "https://example.org/compose.yaml"
+
+	got, err := resolveImportPaths(url)
+	if err != nil {
+		t.Fatalf("resolveImportPaths(url): %v", err)
+	}
+
+	want := []string{url}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveImportPaths(url) = %v, want %v", got, want)
+	}
+}
+
+func TestImportFileFromYAMLURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write([]byte("services:\n  web:\n    image: nginx:latest\n"))
+	}))
+	defer server.Close()
+
+	m, err := importFile(server.URL + "/compose.yaml")
+	if err != nil {
+		t.Fatalf("importFile(url): %v", err)
+	}
+
+	if m == nil {
+		t.Fatalf("expected non-nil manifest")
+	}
+
+	if len(m.Services) != 1 || m.Services[0].Name != "web" {
+		t.Fatalf("expected one imported service named web, got %#v", m.Services)
 	}
 }

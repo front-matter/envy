@@ -43,6 +43,7 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 		o.SkipInterpolation = true
 		o.SkipResolveEnvironment = true
 		o.SkipNormalization = true
+		o.SkipConsistencyCheck = true
 		o.SetProjectName(filepath.Base(filepath.Dir(absPath)), false)
 	})
 	if err != nil {
@@ -70,14 +71,14 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 			Version:      "v1",
 		},
 		Services: make([]manifest.Service, 0, len(serviceNames)),
-		Groups:   make(map[string]manifest.Group),
+		Sets:     make(map[string]manifest.Set),
 		Volumes:  volumes,
 		Networks: networks,
 	}
 
 	for _, serviceName := range serviceNames {
 		svc := project.Services[serviceName]
-		groupKey := serviceGroupKey(serviceName)
+		setKey := serviceSetKey(serviceName)
 
 		vars := composeEnvToVars(svc.Environment)
 
@@ -87,36 +88,36 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 			Platform:   strings.TrimSpace(svc.Platform),
 			Entrypoint: []string(svc.Entrypoint),
 			Command:    []string(svc.Command),
-			Groups:     []string{groupKey},
+			Sets:       []string{setKey},
 		})
 
-		m.Groups[groupKey] = manifest.Group{
+		m.Sets[setKey] = manifest.Set{
 			Description: fmt.Sprintf("Imported environment for service %s", serviceName),
 			Vars:        vars,
 		}
 	}
 
-	consolidateCommonGroupVars(m)
+	consolidateCommonSetVars(m)
 
 	return m, nil
 }
 
-func consolidateCommonGroupVars(m *manifest.Manifest) {
+func consolidateCommonSetVars(m *manifest.Manifest) {
 	if m == nil || len(m.Services) < 2 {
 		return
 	}
 
 	varDefinitions := make(map[string]manifest.Var)
-	varGroups := make(map[string][]string)
+	varSets := make(map[string][]string)
 	varConflicts := make(map[string]bool)
 
-	for groupKey, group := range m.Groups {
-		seenInGroup := make(map[string]bool)
-		for _, variable := range group.Vars {
-			if seenInGroup[variable.Key] {
+	for setKey, set := range m.Sets {
+		seenInSet := make(map[string]bool)
+		for _, variable := range set.Vars {
+			if seenInSet[variable.Key] {
 				continue
 			}
-			seenInGroup[variable.Key] = true
+			seenInSet[variable.Key] = true
 
 			if existing, ok := varDefinitions[variable.Key]; ok {
 				if !sameManifestVar(existing, variable) {
@@ -126,14 +127,14 @@ func consolidateCommonGroupVars(m *manifest.Manifest) {
 				varDefinitions[variable.Key] = variable
 			}
 
-			varGroups[variable.Key] = append(varGroups[variable.Key], groupKey)
+			varSets[variable.Key] = append(varSets[variable.Key], setKey)
 		}
 	}
 
 	commonKeys := make([]string, 0)
 	commonKeySet := make(map[string]bool)
-	for key, groups := range varGroups {
-		if len(groups) > 1 && !varConflicts[key] {
+	for key, sets := range varSets {
+		if len(sets) > 1 && !varConflicts[key] {
 			commonKeys = append(commonKeys, key)
 			commonKeySet[key] = true
 		}
@@ -144,11 +145,11 @@ func consolidateCommonGroupVars(m *manifest.Manifest) {
 	}
 	sort.Strings(commonKeys)
 
-	affectedGroups := make(map[string]bool)
-	for groupKey, group := range m.Groups {
-		filtered := make([]manifest.Var, 0, len(group.Vars))
+	affectedSets := make(map[string]bool)
+	for setKey, set := range m.Sets {
+		filtered := make([]manifest.Var, 0, len(set.Vars))
 		removedAny := false
-		for _, variable := range group.Vars {
+		for _, variable := range set.Vars {
 			if commonKeySet[variable.Key] {
 				removedAny = true
 				continue
@@ -157,16 +158,16 @@ func consolidateCommonGroupVars(m *manifest.Manifest) {
 		}
 
 		if removedAny {
-			affectedGroups[groupKey] = true
+			affectedSets[setKey] = true
 		}
 
 		if len(filtered) == 0 {
-			delete(m.Groups, groupKey)
+			delete(m.Sets, setKey)
 			continue
 		}
 
-		group.Vars = filtered
-		m.Groups[groupKey] = group
+		set.Vars = filtered
+		m.Sets[setKey] = set
 	}
 
 	commonVars := make([]manifest.Var, 0, len(commonKeys))
@@ -174,32 +175,32 @@ func consolidateCommonGroupVars(m *manifest.Manifest) {
 		commonVars = append(commonVars, varDefinitions[key])
 	}
 
-	if existing, ok := m.Groups["common"]; ok {
+	if existing, ok := m.Sets["common"]; ok {
 		existing.Description = "Shared environment for multiple services"
 		existing.Vars = mergeVars(existing.Vars, commonVars)
-		m.Groups["common"] = existing
+		m.Sets["common"] = existing
 	} else {
-		m.Groups["common"] = manifest.Group{
+		m.Sets["common"] = manifest.Set{
 			Description: "Shared environment for multiple services",
 			Vars:        commonVars,
 		}
 	}
 
 	for index, service := range m.Services {
-		updatedGroups := make([]string, 0, len(service.Groups)+1)
+		updatedSets := make([]string, 0, len(service.Sets)+1)
 		needsCommon := false
-		for _, groupKey := range service.Groups {
-			if affectedGroups[groupKey] {
+		for _, setKey := range service.Sets {
+			if affectedSets[setKey] {
 				needsCommon = true
 			}
-			if _, ok := m.Groups[groupKey]; ok {
-				updatedGroups = append(updatedGroups, groupKey)
+			if _, ok := m.Sets[setKey]; ok {
+				updatedSets = append(updatedSets, setKey)
 			}
 		}
 		if needsCommon {
-			updatedGroups = append([]string{"common"}, updatedGroups...)
+			updatedSets = append([]string{"common"}, updatedSets...)
 		}
-		service.Groups = dedupePreserveOrder(updatedGroups)
+		service.Sets = dedupePreserveOrder(updatedSets)
 		m.Services[index] = service
 	}
 }
@@ -263,7 +264,7 @@ func isSecretVar(key string) bool {
 	return strings.Contains(upper, "_SECRET") || strings.Contains(upper, "_PASSWORD")
 }
 
-func serviceGroupKey(serviceName string) string {
+func serviceSetKey(serviceName string) string {
 	serviceName = strings.ToLower(strings.TrimSpace(serviceName))
 	if serviceName == "" {
 		return "service"

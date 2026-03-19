@@ -33,13 +33,13 @@ func renderMarkdown(m *manifest.Manifest) string {
 		m.Meta.VersionLabel(), m.Meta.Docs,
 	))
 
-	for _, group := range m.OrderedGroups() {
-		sb.WriteString(fmt.Sprintf("## %s\n\n", group.Key))
-		sb.WriteString(fmt.Sprintf("%s\n\n", group.Description))
+	for _, set := range m.OrderedSets() {
+		sb.WriteString(fmt.Sprintf("## %s\n\n", set.Key))
+		sb.WriteString(fmt.Sprintf("%s\n\n", set.Description))
 		sb.WriteString("| Variable | Required | Default | Description |\n")
 		sb.WriteString("|---|---|---|---|\n")
 
-		for _, v := range group.Vars {
+		for _, v := range set.Vars {
 			req := "—"
 			if v.IsRequired() {
 				req = "✅"
@@ -73,12 +73,12 @@ func renderRST(m *manifest.Manifest) string {
 	sb.WriteString(title + "\n")
 	sb.WriteString(strings.Repeat("=", len(title)) + "\n\n")
 
-	for _, group := range m.OrderedGroups() {
-		sb.WriteString(group.Key + "\n")
-		sb.WriteString(strings.Repeat("-", len(group.Key)) + "\n\n")
-		sb.WriteString(group.Description + "\n\n")
+	for _, set := range m.OrderedSets() {
+		sb.WriteString(set.Key + "\n")
+		sb.WriteString(strings.Repeat("-", len(set.Key)) + "\n\n")
+		sb.WriteString(set.Description + "\n\n")
 
-		for _, v := range group.Vars {
+		for _, v := range set.Vars {
 			req := ""
 			if v.IsRequired() {
 				req = " *(required)*"
@@ -106,9 +106,9 @@ func renderTable(m *manifest.Manifest) string {
 	sb.WriteString(header + "\n")
 	sb.WriteString(strings.Repeat("─", len(header)) + "\n")
 
-	for _, group := range m.OrderedGroups() {
-		sb.WriteString(fmt.Sprintf("\n# %s\n", group.Key))
-		for _, v := range group.Vars {
+	for _, set := range m.OrderedSets() {
+		sb.WriteString(fmt.Sprintf("\n# %s\n", set.Key))
+		for _, v := range set.Vars {
 			req := "opt"
 			if v.IsRequired() {
 				req = "REQ"

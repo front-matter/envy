@@ -12,7 +12,7 @@ var lintCmd = &cobra.Command{
 	Use:   "lint",
 	Short: "Lint env.yaml for non-fatal configuration issues",
 	Long: `Lint env.yaml for warnings such as ambiguous defaults and
-invalid service-to-group references.
+invalid service-to-set references.
 
 Examples:
   envy lint

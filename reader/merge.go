@@ -7,14 +7,14 @@ import (
 )
 
 // Merge combines multiple manifests into a single manifest.
-// Services are appended, groups are merged with later sources overwriting earlier ones.
-// Variables within groups are merged with later sources providing defaults for missing vars.
+// Services are appended, sets are merged with later sources overwriting earlier ones.
+// Variables within sets are merged with later sources providing defaults for missing vars.
 func Merge(manifests ...*manifest.Manifest) *manifest.Manifest {
 	if len(manifests) == 0 {
 		return &manifest.Manifest{
 			Meta:     manifest.Meta{Title: "Merged Manifest", LanguageCode: "en-US", Version: "v1"},
 			Services: []manifest.Service{},
-			Groups:   make(map[string]manifest.Group),
+			Sets:     make(map[string]manifest.Set),
 		}
 	}
 
@@ -31,14 +31,14 @@ func Merge(manifests ...*manifest.Manifest) *manifest.Manifest {
 			Version:      "v1",
 		},
 		Services: make([]manifest.Service, len(manifests[0].Services)),
-		Groups:   make(map[string]manifest.Group),
+		Sets:     make(map[string]manifest.Set),
 	}
 
 	copy(merged.Services, manifests[0].Services)
 
-	// Copy groups from first manifest
-	for key, group := range manifests[0].Groups {
-		merged.Groups[key] = group
+	// Copy sets from first manifest
+	for key, set := range manifests[0].Sets {
+		merged.Sets[key] = set
 	}
 
 	// Merge subsequent manifests
@@ -48,37 +48,37 @@ func Merge(manifests ...*manifest.Manifest) *manifest.Manifest {
 		// Append services
 		merged.Services = append(merged.Services, m.Services...)
 
-		// Merge groups: combine variables with later sources taking precedence
-		for groupKey, group := range m.Groups {
-			// Special case: if this is the "env" group, filter out vars that already exist in other groups
-			if groupKey == "env" {
+		// Merge sets: combine variables with later sources taking precedence
+		for setKey, set := range m.Sets {
+			// Special case: if this is the "env" set, filter out vars that already exist in other sets
+			if setKey == "env" {
 				otherKeys := make(map[string]bool)
-				for gk, g := range merged.Groups {
+				for gk, g := range merged.Sets {
 					if gk != "env" {
 						for _, v := range g.Vars {
 							otherKeys[v.Key] = true
 						}
 					}
 				}
-				// Filter env vars to exclude those already in other groups
+				// Filter env vars to exclude those already in other sets.
 				var filteredVars []manifest.Var
-				for _, v := range group.Vars {
+				for _, v := range set.Vars {
 					if !otherKeys[v.Key] {
 						filteredVars = append(filteredVars, v)
 					}
 				}
-				group.Vars = filteredVars
+				set.Vars = filteredVars
 			}
 
-			if existing, ok := merged.Groups[groupKey]; ok {
-				// Group already exists, merge variables
-				vars := mergeVars(existing.Vars, group.Vars)
+			if existing, ok := merged.Sets[setKey]; ok {
+				// Set already exists, merge variables.
+				vars := mergeVars(existing.Vars, set.Vars)
 				existing.Vars = vars
-				// Update merged groups with the merged group
-				merged.Groups[groupKey] = existing
+				// Update merged sets with the merged set.
+				merged.Sets[setKey] = existing
 			} else {
-				// New group, add it
-				merged.Groups[groupKey] = group
+				// New set, add it.
+				merged.Sets[setKey] = set
 			}
 		}
 	}

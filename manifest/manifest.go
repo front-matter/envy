@@ -15,19 +15,19 @@ var dockerImagePattern = regexp.MustCompile(`^([A-Za-z0-9.-]+(?::[0-9]+)?/)?[a-z
 
 // Manifest is the top-level env.yaml structure.
 type Manifest struct {
-	Meta     Meta             `yaml:"meta"`
-	Services []Service        `yaml:"services,omitempty"`
-	Groups   map[string]Group `yaml:"groups,omitempty"`
-	Volumes  []string         `yaml:"volumes,omitempty"`
-	Networks []string         `yaml:"networks,omitempty"`
+	Meta     Meta           `yaml:"meta"`
+	Services []Service      `yaml:"services,omitempty"`
+	Sets     map[string]Set `yaml:"sets,omitempty"`
+	Volumes  []string       `yaml:"volumes,omitempty"`
+	Networks []string       `yaml:"networks,omitempty"`
 }
 
-// MarshalYAML omits groups with no vars and writes services/vars in mapping style.
+// MarshalYAML omits sets with no vars and writes services/vars in mapping style.
 func (m Manifest) MarshalYAML() (interface{}, error) {
-	filteredGroups := make(map[string]Group)
-	for key, group := range m.Groups {
-		if len(group.Vars) > 0 {
-			filteredGroups[key] = group
+	filteredSets := make(map[string]Set)
+	for key, set := range m.Sets {
+		if len(set.Vars) > 0 {
+			filteredSets[key] = set
 		}
 	}
 
@@ -55,20 +55,20 @@ func (m Manifest) MarshalYAML() (interface{}, error) {
 		appendMapping(root, "services", servicesNode)
 	}
 
-	if len(filteredGroups) > 0 {
-		groupsNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, group := range m.OrderedGroups() {
-			filtered, ok := filteredGroups[group.Key]
+	if len(filteredSets) > 0 {
+		setsNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, set := range m.OrderedSets() {
+			filtered, ok := filteredSets[set.Key]
 			if !ok {
 				continue
 			}
-			groupNode, err := encodeGroupNode(filtered)
+			setNode, err := encodeSetNode(filtered)
 			if err != nil {
 				return nil, err
 			}
-			appendMapping(groupsNode, group.Key, groupNode)
+			appendMapping(setsNode, set.Key, setNode)
 		}
-		appendMapping(root, "groups", groupsNode)
+		appendMapping(root, "sets", setsNode)
 	}
 
 	if len(m.Volumes) > 0 {
@@ -108,12 +108,12 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 			out.Services = services
-		case "groups":
-			groups, err := decodeGroupsNode(value)
+		case "sets":
+			sets, err := decodeSetsNode(value)
 			if err != nil {
 				return err
 			}
-			out.Groups = groups
+			out.Sets = sets
 		case "volumes":
 			volumes, err := decodeNamedEntriesNode(value)
 			if err != nil {
@@ -128,8 +128,8 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 	}
 
 	*m = out
-	if m.Groups == nil {
-		m.Groups = make(map[string]Group)
+	if m.Sets == nil {
+		m.Sets = make(map[string]Set)
 	}
 	return nil
 }
@@ -158,7 +158,7 @@ func (m Meta) LanguageCodeLabel() string {
 	return m.LanguageCode
 }
 
-// Service describes a runtime service and the groups it uses.
+// Service describes a runtime service and the sets it uses.
 type Service struct {
 	Name        string   `yaml:"name"`
 	Image       string   `yaml:"image,omitempty"`
@@ -166,7 +166,7 @@ type Service struct {
 	Entrypoint  []string `yaml:"entrypoint,omitempty"`
 	Command     []string `yaml:"command,omitempty"`
 	Description string   `yaml:"description,omitempty"`
-	Groups      []string `yaml:"groups,omitempty"`
+	Sets        []string `yaml:"sets,omitempty"`
 }
 
 type serviceYAML struct {
@@ -175,10 +175,10 @@ type serviceYAML struct {
 	Entrypoint  []string   `yaml:"entrypoint,omitempty"`
 	Command     *yaml.Node `yaml:"command,omitempty"`
 	Description string     `yaml:"description,omitempty"`
-	Groups      *yaml.Node `yaml:"groups,omitempty"`
+	Sets        *yaml.Node `yaml:"sets,omitempty"`
 }
 
-// MarshalYAML emits command and groups in flow style.
+// MarshalYAML emits command and sets in flow style.
 func (s Service) MarshalYAML() (interface{}, error) {
 	out := serviceYAML{
 		Image:       s.Image,
@@ -195,12 +195,12 @@ func (s Service) MarshalYAML() (interface{}, error) {
 		out.Command = node
 	}
 
-	if len(s.Groups) > 0 {
+	if len(s.Sets) > 0 {
 		node := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
-		for _, item := range s.Groups {
+		for _, item := range s.Sets {
 			node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: item})
 		}
-		out.Groups = node
+		out.Sets = node
 	}
 
 	return out, nil
@@ -237,8 +237,8 @@ func (s *Service) UnmarshalYAML(node *yaml.Node) error {
 			if err := value.Decode(&out.Description); err != nil {
 				return err
 			}
-		case "groups":
-			if err := value.Decode(&out.Groups); err != nil {
+		case "sets":
+			if err := value.Decode(&out.Sets); err != nil {
 				return err
 			}
 		}
@@ -271,36 +271,36 @@ func isValidImageReference(value string) bool {
 	return dockerImagePattern.MatchString(value)
 }
 
-// Group is a logical grouping of related variables.
-type Group struct {
+// Set is a logical grouping of related variables.
+type Set struct {
 	Key         string `yaml:"-"`
 	Description string `yaml:"description,omitempty"`
 	Link        string `yaml:"link,omitempty"`
 	Vars        []Var  `yaml:"vars,omitempty"`
 }
 
-type groupYAML struct {
+type setYAML struct {
 	Description string     `yaml:"description,omitempty"`
 	Link        string     `yaml:"link,omitempty"`
 	Vars        *yaml.Node `yaml:"vars,omitempty"`
 }
 
-// OrderedGroups returns all groups in deterministic order.
-func (m *Manifest) OrderedGroups() []Group {
-	keys := make([]string, 0, len(m.Groups))
-	for key := range m.Groups {
+// OrderedSets returns all sets in deterministic order.
+func (m *Manifest) OrderedSets() []Set {
+	keys := make([]string, 0, len(m.Sets))
+	for key := range m.Sets {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
-	groups := make([]Group, 0, len(keys))
+	sets := make([]Set, 0, len(keys))
 	for _, key := range keys {
-		g := m.Groups[key]
-		g.Key = key
-		groups = append(groups, g)
+		set := m.Sets[key]
+		set.Key = key
+		sets = append(sets, set)
 	}
 
-	return groups
+	return sets
 }
 
 // Var defines a single environment variable's spec.
@@ -406,17 +406,17 @@ func appendMapping(node *yaml.Node, key string, value *yaml.Node) {
 	)
 }
 
-func encodeGroupNode(group Group) (*yaml.Node, error) {
-	groupNode := &yaml.Node{Kind: yaml.MappingNode}
-	if group.Description != "" {
-		appendMapping(groupNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: group.Description})
+func encodeSetNode(set Set) (*yaml.Node, error) {
+	setNode := &yaml.Node{Kind: yaml.MappingNode}
+	if set.Description != "" {
+		appendMapping(setNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Description})
 	}
-	if group.Link != "" {
-		appendMapping(groupNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: group.Link})
+	if set.Link != "" {
+		appendMapping(setNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Link})
 	}
-	if len(group.Vars) > 0 {
+	if len(set.Vars) > 0 {
 		varsNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, v := range group.Vars {
+		for _, v := range set.Vars {
 			varNodeValue, err := v.MarshalYAML()
 			if err != nil {
 				return nil, err
@@ -430,9 +430,9 @@ func encodeGroupNode(group Group) (*yaml.Node, error) {
 			}
 			appendMapping(varsNode, v.Key, encoded)
 		}
-		appendMapping(groupNode, "vars", varsNode)
+		appendMapping(setNode, "vars", varsNode)
 	}
-	return groupNode, nil
+	return setNode, nil
 }
 
 func decodeServicesNode(node *yaml.Node) ([]Service, error) {
@@ -453,27 +453,27 @@ func decodeServicesNode(node *yaml.Node) ([]Service, error) {
 	return services, nil
 }
 
-func decodeGroupsNode(node *yaml.Node) (map[string]Group, error) {
+func decodeSetsNode(node *yaml.Node) (map[string]Set, error) {
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("expected groups mapping, got YAML kind %d", node.Kind)
+		return nil, fmt.Errorf("expected sets mapping, got YAML kind %d", node.Kind)
 	}
 
-	groups := make(map[string]Group, len(node.Content)/2)
+	sets := make(map[string]Set, len(node.Content)/2)
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
-		group, err := decodeGroupNode(node.Content[i+1])
+		set, err := decodeSetNode(node.Content[i+1])
 		if err != nil {
 			return nil, err
 		}
-		groups[key] = group
+		sets[key] = set
 	}
-	return groups, nil
+	return sets, nil
 }
 
-func decodeGroupNode(node *yaml.Node) (Group, error) {
-	var out Group
+func decodeSetNode(node *yaml.Node) (Set, error) {
+	var out Set
 	if node.Kind != yaml.MappingNode {
-		return out, fmt.Errorf("expected group mapping, got YAML kind %d", node.Kind)
+		return out, fmt.Errorf("expected set mapping, got YAML kind %d", node.Kind)
 	}
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
@@ -550,29 +550,29 @@ func decodeNamedEntriesNode(node *yaml.Node) ([]string, error) {
 	}
 }
 
-// AllVars returns a flat slice of all variables across all groups.
+// AllVars returns a flat slice of all variables across all sets.
 func (m *Manifest) AllVars() []Var {
 	var vars []Var
-	for _, g := range m.OrderedGroups() {
-		vars = append(vars, g.Vars...)
+	for _, set := range m.OrderedSets() {
+		vars = append(vars, set.Vars...)
 	}
 	return vars
 }
 
-// GroupVars holds vars for a single group.
-type GroupVars struct {
-	GroupKey    string
+// SetVars holds vars for a single set.
+type SetVars struct {
+	SetKey      string
 	Description string
 	Vars        []Var
 }
 
-// VarsForServiceByGroup returns vars per group for a service, preserving group order.
-func (m *Manifest) VarsForServiceByGroup(serviceName string) []GroupVars {
+// VarsForServiceBySet returns vars per set for a service, preserving set order.
+func (m *Manifest) VarsForServiceBySet(serviceName string) []SetVars {
 	name := strings.TrimSpace(serviceName)
 	if name == "" {
-		var result []GroupVars
-		for _, g := range m.OrderedGroups() {
-			result = append(result, GroupVars{GroupKey: g.Key, Description: g.Description, Vars: g.Vars})
+		var result []SetVars
+		for _, set := range m.OrderedSets() {
+			result = append(result, SetVars{SetKey: set.Key, Description: set.Description, Vars: set.Vars})
 		}
 		return result
 	}
@@ -581,20 +581,20 @@ func (m *Manifest) VarsForServiceByGroup(serviceName string) []GroupVars {
 		if svc.Name != name {
 			continue
 		}
-		var result []GroupVars
-		for _, groupKey := range svc.Groups {
-			group, ok := m.Groups[groupKey]
+		var result []SetVars
+		for _, setKey := range svc.Sets {
+			set, ok := m.Sets[setKey]
 			if !ok {
 				continue
 			}
-			result = append(result, GroupVars{GroupKey: groupKey, Description: group.Description, Vars: group.Vars})
+			result = append(result, SetVars{SetKey: setKey, Description: set.Description, Vars: set.Vars})
 		}
 		return result
 	}
 
-	var result []GroupVars
-	for _, g := range m.OrderedGroups() {
-		result = append(result, GroupVars{GroupKey: g.Key, Description: g.Description, Vars: g.Vars})
+	var result []SetVars
+	for _, set := range m.OrderedSets() {
+		result = append(result, SetVars{SetKey: set.Key, Description: set.Description, Vars: set.Vars})
 	}
 	return result
 }
@@ -612,12 +612,12 @@ func (m *Manifest) VarsForService(serviceName string) []Var {
 		}
 
 		var vars []Var
-		for _, groupKey := range svc.Groups {
-			group, ok := m.Groups[groupKey]
+		for _, setKey := range svc.Sets {
+			set, ok := m.Sets[setKey]
 			if !ok {
 				continue
 			}
-			vars = append(vars, group.Vars...)
+			vars = append(vars, set.Vars...)
 		}
 		return vars
 	}
@@ -686,11 +686,11 @@ func (m *Manifest) Lint() []string {
 			))
 		}
 
-		for _, groupKey := range svc.Groups {
-			if _, ok := m.Groups[groupKey]; !ok {
+		for _, setKey := range svc.Sets {
+			if _, ok := m.Sets[setKey]; !ok {
 				warnings = append(warnings, fmt.Sprintf(
-					"services.%s: unknown group %q",
-					svc.Name, groupKey,
+					"services.%s: unknown set %q",
+					svc.Name, setKey,
 				))
 			}
 		}

@@ -85,7 +85,7 @@ envy import compose.yaml --file ./generated
 
 # Safety: if target file already exists, import prints a warning and does not overwrite it
 
-# Lint manifest for non-fatal issues (e.g. unknown service groups)
+# Lint manifest for non-fatal issues (e.g. unknown service sets)
 envy lint
 
 # See what's missing or undocumented
@@ -145,9 +145,9 @@ services:
     entrypoint: ["/entrypoint.sh"]
     command: ["celery", "-A", "invenio_app.celery", "worker", "--loglevel=INFO"]
     description: Frontend/API service
-    groups: [application, database]
+    sets: [application, database]
 
-groups:
+sets:
   application:
     description: Core Flask/InvenioRDM settings
     vars:
@@ -166,7 +166,7 @@ groups:
 
 ### Var fields
 
-`groups` is a map keyed by a stable slug (for example `application`, `database`).
+`sets` is a map keyed by a stable slug (for example `application`, `database`).
 Top-level `services` reference these slugs to define per-service config sets.
 Each service can also define `image` and `platform`. If `platform` is omitted,
 compose generation falls back to `linux/amd64`. If `platform` is set, it should

@@ -44,7 +44,7 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 			Name:  "web",
 			Image: "ghcr.io/example/web:latest",
 		}},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"web": {
 				Vars: []Var{{
 					Key: "APP_ENV",
@@ -84,10 +84,10 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 	m := Manifest{
 		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
 		Services: []Service{
-			{Name: "web", Groups: []string{"web"}},
-			{Name: "cache", Groups: []string{"cache"}},
+			{Name: "web", Sets: []string{"web"}},
+			{Name: "cache", Sets: []string{"cache"}},
 		},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"web": {
 				Vars: []Var{{Key: "APP_ENV"}},
 			},
@@ -106,15 +106,15 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 	if !strings.Contains(output, "\n    cache:\n") {
 		t.Fatalf("expected service without associated vars to be kept, got:\n%s", output)
 	}
-	if strings.Contains(output, "groups:\n    cache:") {
-		t.Fatalf("expected empty group to be omitted, got:\n%s", output)
+	if strings.Contains(output, "sets:\n    cache:") {
+		t.Fatalf("expected empty set to be omitted, got:\n%s", output)
 	}
 }
 
 func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	m := Manifest{
 		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"env": {
 				Vars: []Var{
 					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true", Editable: "true"},
@@ -168,7 +168,7 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 		t.Fatalf("did not expect YAML boolean editable true, got:\n%s", output)
 	}
 	if !strings.Contains(output, "BOOL_TRUE:") {
-		t.Fatalf("expected group vars to be written as mapping style, got:\n%s", output)
+		t.Fatalf("expected set vars to be written as mapping style, got:\n%s", output)
 	}
 }
 
@@ -179,9 +179,9 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 			Name:    "worker",
 			Image:   "ghcr.io/example/worker:latest",
 			Command: []string{"celery", "worker"},
-			Groups:  []string{"app"},
+			Sets:  []string{"app"},
 		}},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"app": {Vars: []Var{{Key: "CELERY_BROKER_URL"}}},
 		},
 	}
@@ -198,8 +198,8 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 	if !strings.Contains(output, "command: [\"celery\", \"worker\"]") {
 		t.Fatalf("expected command in flow-list format, got:\n%s", output)
 	}
-	if !strings.Contains(output, "groups: [app]") {
-		t.Fatalf("expected service groups to be written as inline list, got:\n%s", output)
+	if !strings.Contains(output, "sets: [app]") {
+		t.Fatalf("expected service sets to be written as inline list, got:\n%s", output)
 	}
 	if strings.Contains(output, "command:\n") {
 		t.Fatalf("did not expect block-list command format, got:\n%s", output)
@@ -254,8 +254,8 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 		"services:",
 		"  web:",
 		"    image: ghcr.io/example/web:latest",
-		"    groups: [application]",
-		"groups:",
+		"    sets: [application]",
+		"sets:",
 		"  application:",
 		"    description: App settings",
 		"    vars:",
@@ -272,19 +272,19 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	if len(m.Services) != 1 || m.Services[0].Name != "web" {
 		t.Fatalf("expected one service named web, got %+v", m.Services)
 	}
-	if len(m.Services[0].Groups) != 1 || m.Services[0].Groups[0] != "application" {
-		t.Fatalf("expected service group application, got %+v", m.Services[0].Groups)
+	if len(m.Services[0].Sets) != 1 || m.Services[0].Sets[0] != "application" {
+		t.Fatalf("expected service set application, got %+v", m.Services[0].Sets)
 	}
 
-	group, ok := m.Groups["application"]
+	set, ok := m.Sets["application"]
 	if !ok {
-		t.Fatalf("expected application group")
+		t.Fatalf("expected application set")
 	}
-	if len(group.Vars) != 1 || group.Vars[0].Key != "APP_ENV" {
-		t.Fatalf("expected APP_ENV var, got %+v", group.Vars)
+	if len(set.Vars) != 1 || set.Vars[0].Key != "APP_ENV" {
+		t.Fatalf("expected APP_ENV var, got %+v", set.Vars)
 	}
-	if group.Vars[0].Default != "production" {
-		t.Fatalf("expected default production, got %q", group.Vars[0].Default)
+	if set.Vars[0].Default != "production" {
+		t.Fatalf("expected default production, got %q", set.Vars[0].Default)
 	}
 }
 
@@ -293,7 +293,7 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 		"meta:",
 		"  title: Example",
 		"  version: v1",
-		"groups:",
+		"sets:",
 		"  app:",
 		"    vars:",
 		"      SECRET_KEY:",
@@ -306,12 +306,12 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	group, ok := m.Groups["app"]
-	if !ok || len(group.Vars) != 1 {
-		t.Fatalf("expected app group with one var, got %#v", m.Groups)
+	set, ok := m.Sets["app"]
+	if !ok || len(set.Vars) != 1 {
+		t.Fatalf("expected app set with one var, got %#v", m.Sets)
 	}
 
-	secret := group.Vars[0]
+	secret := set.Vars[0]
 	if !secret.IsSecret() {
 		t.Fatalf("expected var to be secret")
 	}
@@ -327,7 +327,7 @@ func TestManifestLoadGroupLink(t *testing.T) {
 	input := strings.Join([]string{
 		"meta:",
 		"  title: Example",
-		"groups:",
+		"sets:",
 		"  common:",
 		"    description: Shared settings",
 		"    link: https://example.org/common",
@@ -341,12 +341,12 @@ func TestManifestLoadGroupLink(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	group, ok := m.Groups["common"]
+	set, ok := m.Sets["common"]
 	if !ok {
-		t.Fatalf("expected common group")
+		t.Fatalf("expected common set")
 	}
-	if group.Link != "https://example.org/common" {
-		t.Fatalf("expected group link to be preserved, got %q", group.Link)
+	if set.Link != "https://example.org/common" {
+		t.Fatalf("expected set link to be preserved, got %q", set.Link)
 	}
 
 	data, err := yaml.Marshal(m)
@@ -354,14 +354,14 @@ func TestManifestLoadGroupLink(t *testing.T) {
 		t.Fatalf("yaml.Marshal() error = %v", err)
 	}
 	if !strings.Contains(string(data), "link: https://example.org/common") {
-		t.Fatalf("expected marshaled YAML to contain group link, got:\n%s", string(data))
+		t.Fatalf("expected marshaled YAML to contain set link, got:\n%s", string(data))
 	}
 }
 
 func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 	m := Manifest{
 		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"web": {
 				Vars: []Var{{
 					Key:         "APP_ENV",
@@ -385,7 +385,7 @@ func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 func TestManifestMarshalOmitsImportedEnvFileVarDescription(t *testing.T) {
 	m := Manifest{
 		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"env": {
 				Vars: []Var{{
 					Key:         "APP_ENV",
@@ -460,10 +460,10 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 				Name:     "web",
 				Image:    "https://ghcr.io/front-matter/app:latest",
 				Platform: "linux",
-				Groups:   []string{"application"},
+				Sets:   []string{"application"},
 			},
 		},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"application": {},
 		},
 	}
@@ -485,10 +485,10 @@ func TestLintAllowsMissingPlatform(t *testing.T) {
 			{
 				Name:   "web",
 				Image:  "ghcr.io/front-matter/invenio-rdm-starter:latest",
-				Groups: []string{"application"},
+				Sets: []string{"application"},
 			},
 		},
-		Groups: map[string]Group{
+		Sets: map[string]Set{
 			"application": {},
 		},
 	}

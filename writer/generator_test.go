@@ -10,7 +10,7 @@ import (
 func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "Example"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "REQ", Default: "x", Description: "required var", Required: "true", Editable: "true"},
@@ -36,7 +36,7 @@ func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 func TestGenerateSkipsNonEditableVars(t *testing.T) {
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "Example"},
-		Groups: map[string]manifest.Group{
+		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
 					{Key: "EDITABLE_VAR", Default: "x", Description: "included", Editable: "true"},

@@ -23,8 +23,8 @@ func (e Error) String() string {
 func Validate(m *manifest.Manifest, env map[string]string) []Error {
 	var errs []Error
 
-	for _, group := range m.OrderedGroups() {
-		for _, v := range group.Vars {
+	for _, set := range m.OrderedSets() {
+		for _, v := range set.Vars {
 			value, present := env[v.Key]
 
 			if v.IsRequired() && (!present || value == "") {

@@ -139,12 +139,12 @@ func hasConfigFlag(args []string) bool {
 func resolveBuildManifestPath() (string, error) {
 	path, err := resolveManifest(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("envy build requires env.yaml: %w\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\ngroups:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
+		return "", fmt.Errorf("envy build requires env.yaml: %w\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
 	}
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("envy build requires env.yaml at %s\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\ngroups:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
+			return "", fmt.Errorf("envy build requires env.yaml at %s\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
 		}
 		return "", fmt.Errorf("checking env.yaml at %s: %w", path, err)
 	}
@@ -311,10 +311,10 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 		return "", err
 	}
 
-	groupsDir := filepath.Join(tmpDir, "groups")
-	if err := os.MkdirAll(groupsDir, 0o755); err != nil {
+	setsDir := filepath.Join(tmpDir, "sets")
+	if err := os.MkdirAll(setsDir, 0o755); err != nil {
 		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("creating generated groups directory: %w", err)
+		return "", fmt.Errorf("creating generated sets directory: %w", err)
 	}
 
 	if err := writeFileIfMissing(filepath.Join(tmpDir, "_index.md"), generateHomeMarkdown(m)); err != nil {
@@ -322,14 +322,14 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 		return "", err
 	}
 
-	if err := writeFileIfMissing(filepath.Join(groupsDir, "_index.md"), generateGroupsIndexMarkdown(m)); err != nil {
+	if err := writeFileIfMissing(filepath.Join(setsDir, "_index.md"), generateSetsIndexMarkdown(m)); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
-	for _, group := range m.OrderedGroups() {
-		pagePath := filepath.Join(groupsDir, sanitizeGroupPageName(group.Key)+".md")
-		if err := writeFileIfMissing(pagePath, generateGroupMarkdown(m, group)); err != nil {
+	for _, set := range m.OrderedSets() {
+		pagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+".md")
+		if err := writeFileIfMissing(pagePath, generateSetMarkdown(m, set)); err != nil {
 			os.RemoveAll(tmpDir)
 			return "", err
 		}
@@ -492,24 +492,24 @@ func normalizeMarkdownDescription(description string) string {
 	return description
 }
 
-func generateGroupsIndexMarkdown(m *manifest.Manifest) string {
+func generateSetsIndexMarkdown(m *manifest.Manifest) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       "Groups",
-		"description": "Auto-generated configuration group reference from env.yaml.",
+		"title":       "Sets",
+		"description": "Auto-generated configuration set reference from env.yaml.",
 		"weight":      10,
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
-				"name":   "Groups",
+				"name":   "Sets",
 				"weight": 10,
 			},
 		},
 	}))
 	body.WriteString("This section is generated from env.yaml during `envy build`.\n\n")
 	body.WriteString(renderCardsOpen(3))
-	for _, group := range m.OrderedGroups() {
-		description := strings.TrimSpace(defaultString(group.Description, "Group configuration"))
-		body.WriteString(renderCard(group.Key, "/groups/"+sanitizeGroupPageName(group.Key)+"/", groupIcon(group.Key), description))
+	for _, set := range m.OrderedSets() {
+		description := strings.TrimSpace(defaultString(set.Description, "Set configuration"))
+		body.WriteString(renderCard(set.Key, "/sets/"+sanitizeSetPageName(set.Key)+"/", setIcon(set.Key), description))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
@@ -538,18 +538,18 @@ func generateServicesIndexMarkdown(m *manifest.Manifest) string {
 	return body.String()
 }
 
-func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
+func generateSetMarkdown(m *manifest.Manifest, set manifest.Set) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       group.Key,
-		"description": strings.TrimSpace(group.Description),
-		"weight":      groupWeight(m, group.Key),
+		"title":       set.Key,
+		"description": strings.TrimSpace(set.Description),
+		"weight":      setWeight(m, set.Key),
 	}))
-	if strings.TrimSpace(group.Description) != "" {
-		body.WriteString(strings.TrimSpace(group.Description) + "\n\n")
+	if strings.TrimSpace(set.Description) != "" {
+		body.WriteString(strings.TrimSpace(set.Description) + "\n\n")
 	}
 
-	services := servicesForGroup(m, group.Key)
+	services := servicesForSet(m, set.Key)
 	if len(services) > 0 {
 		body.WriteString("## Services\n\n")
 		for _, service := range services {
@@ -558,16 +558,16 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 		body.WriteString("\n")
 	}
 
-	if strings.TrimSpace(group.Link) != "" {
-		body.WriteString(fmt.Sprintf("## Documentation\n\n![Documentation](/images/readme.svg) [%s](%s)\n\n", group.Link, group.Link))
+	if strings.TrimSpace(set.Link) != "" {
+		body.WriteString(fmt.Sprintf("## Documentation\n\n![Documentation](/images/readme.svg) [%s](%s)\n\n", set.Link, set.Link))
 	}
 
 	body.WriteString("## Variables\n\n")
-	if len(group.Vars) == 0 {
-		body.WriteString("This group does not define variables.\n")
+	if len(set.Vars) == 0 {
+		body.WriteString("This set does not define variables.\n")
 		return body.String()
 	}
-	for _, variable := range group.Vars {
+	for _, variable := range set.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
 		tag, tagColor := variableCardTag(variable)
@@ -587,14 +587,14 @@ func frontMatterMarkdown(values map[string]interface{}) string {
 	return fmt.Sprintf("---\n%s---\n\n", string(content))
 }
 
-func sanitizeGroupPageName(groupKey string) string {
+func sanitizeSetPageName(setKey string) string {
 	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-")
-	return replacer.Replace(groupKey)
+	return replacer.Replace(setKey)
 }
 
-func groupWeight(m *manifest.Manifest, groupKey string) int {
-	for index, group := range m.OrderedGroups() {
-		if group.Key == groupKey {
+func setWeight(m *manifest.Manifest, setKey string) int {
+	for index, set := range m.OrderedSets() {
+		if set.Key == setKey {
 			return index + 1
 		}
 	}
@@ -648,7 +648,7 @@ func escapeShortcodeRawValue(value string) string {
 	return strings.ReplaceAll(value, "`", "'")
 }
 
-func groupIcon(_ string) string {
+func setIcon(_ string) string {
 	return "folder"
 }
 
@@ -698,11 +698,11 @@ func variableHeadingAnchor(key string) string {
 	return trimmed
 }
 
-func servicesForGroup(m *manifest.Manifest, groupKey string) []string {
+func servicesForSet(m *manifest.Manifest, setKey string) []string {
 	services := make([]string, 0)
 	for _, service := range m.Services {
-		for _, serviceGroup := range service.Groups {
-			if serviceGroup == groupKey {
+		for _, serviceSet := range service.Sets {
+			if serviceSet == setKey {
 				services = append(services, service.Name)
 				break
 			}

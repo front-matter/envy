@@ -17,7 +17,7 @@ type ComposeOptions struct {
 }
 
 // GenerateCompose renders a compose.yaml with one service block per service defined
-// in the manifest.  Each block contains only the env vars belonging to the groups
+// in the manifest.  Each block contains only the env vars belonging to the sets
 // listed for that service.  Pass ServiceName to emit a single service only.
 func GenerateCompose(m *manifest.Manifest, opts ComposeOptions) string {
 	filter := strings.TrimSpace(opts.ServiceName)
@@ -104,7 +104,7 @@ func buildComposeDocument(m *manifest.Manifest, services []manifest.Service, fla
 	servicesNode := &yaml.Node{Kind: yaml.MappingNode}
 
 	for _, svc := range services {
-		appendServiceNode(servicesNode, svc, m.VarsForServiceByGroup(svc.Name), flavor)
+		appendServiceNode(servicesNode, svc, m.VarsForServiceBySet(svc.Name), flavor)
 	}
 
 	root := &yaml.Node{Kind: yaml.MappingNode}
@@ -125,7 +125,7 @@ func buildComposeDocument(m *manifest.Manifest, services []manifest.Service, fla
 	return buf.Bytes(), nil
 }
 
-func appendServiceNode(parent *yaml.Node, svc manifest.Service, groups []manifest.GroupVars, flavor string) {
+func appendServiceNode(parent *yaml.Node, svc manifest.Service, sets []manifest.SetVars, flavor string) {
 	serviceKey := scalarNode(svc.Name, 0)
 	serviceValue := &yaml.Node{Kind: yaml.MappingNode}
 
@@ -141,7 +141,7 @@ func appendServiceNode(parent *yaml.Node, svc manifest.Service, groups []manifes
 		appendMappingSequence(serviceValue, "labels", []string{"coolify.managed=true"}, 0)
 	}
 
-	environment := composeEnvironmentNodeByGroup(groups, flavor)
+	environment := composeEnvironmentNodeBySet(sets, flavor)
 	if len(environment.Content) > 0 {
 		appendMappingNode(serviceValue, "environment", environment)
 	}
@@ -169,11 +169,11 @@ func composeServicePlatform(svc manifest.Service) string {
 	return platform
 }
 
-func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *yaml.Node {
+func composeEnvironmentNodeBySet(sets []manifest.SetVars, flavor string) *yaml.Node {
 	environment := &yaml.Node{Kind: yaml.MappingNode}
-	for _, g := range groups {
-		visibleVars := make([]manifest.Var, 0, len(g.Vars))
-		for _, v := range g.Vars {
+	for _, setVars := range sets {
+		visibleVars := make([]manifest.Var, 0, len(setVars.Vars))
+		for _, v := range setVars.Vars {
 			if v.IsSecret() {
 				continue
 			}
@@ -183,17 +183,17 @@ func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *
 		if len(visibleVars) == 0 {
 			continue
 		}
-		dashes := strings.Repeat("─", dashWidth(g.GroupKey))
-		groupHeader := fmt.Sprintf("# ── %s %s", g.GroupKey, dashes)
-		if desc := strings.TrimSpace(g.Description); desc != "" {
-			groupHeader += "\n# " + desc
+		dashes := strings.Repeat("─", dashWidth(setVars.SetKey))
+		setHeader := fmt.Sprintf("# ── %s %s", setVars.SetKey, dashes)
+		if desc := strings.TrimSpace(setVars.Description); desc != "" {
+			setHeader += "\n# " + desc
 		}
 		first := true
 		for _, v := range visibleVars {
 			key := scalarNode(v.Key, 0)
 			var headComment string
 			if first {
-				headComment = groupHeader
+				headComment = setHeader
 				first = false
 			}
 			if desc := strings.TrimSpace(v.Description); desc != "" {

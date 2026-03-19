@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -123,9 +126,57 @@ func importFile(path string) (*manifest.Manifest, error) {
 		return reader.ImportEnvFile(path)
 	}
 	if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
+		if isHTTPURL(path) {
+			return importComposeFromURL(path)
+		}
 		return reader.ImportCompose(path)
 	}
 	return nil, fmt.Errorf("unsupported file type: %s (expected .env, .env.example, .env.local, compose.yaml, compose.yml, docker-compose.yaml, or docker-compose.yml)", path)
+}
+
+func importComposeFromURL(rawURL string) (*manifest.Manifest, error) {
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("downloading %s: %w", rawURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("downloading %s: unexpected status %s", rawURL, resp.Status)
+	}
+
+	ext := ".yaml"
+	if strings.HasSuffix(strings.ToLower(rawURL), ".yml") {
+		ext = ".yml"
+	}
+
+	tmpFile, err := os.CreateTemp("", "envy-import-url-*"+ext)
+	if err != nil {
+		return nil, fmt.Errorf("creating temporary file for %s: %w", rawURL, err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		tmpFile.Close()
+		return nil, fmt.Errorf("reading %s: %w", rawURL, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, fmt.Errorf("closing temporary file for %s: %w", rawURL, err)
+	}
+
+	return reader.ImportCompose(tmpPath)
+}
+
+func isHTTPURL(path string) bool {
+	parsed, err := url.Parse(path)
+	if err != nil {
+		return false
+	}
+	if parsed == nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 // resolvePath determines the final file path.
@@ -188,6 +239,10 @@ func resolveImportPaths(sourcePath string) ([]string, error) {
 	if sourcePath == "" {
 		// Auto-detect in current directory
 		return autoDetectImportFiles(".")
+	}
+
+	if isHTTPURL(sourcePath) {
+		return []string{sourcePath}, nil
 	}
 
 	info, err := os.Stat(sourcePath)
@@ -298,7 +353,7 @@ func verifyServiceCommandVarsDefined(m *manifest.Manifest) []string {
 	return issues
 }
 
-// filterSecretVars removes vars marked as secret from groups before writing env.yaml.
+// filterSecretVars removes vars marked as secret from sets before writing env.yaml.
 func filterSecretVars(m *manifest.Manifest) *manifest.Manifest {
 	if m == nil {
 		return nil
@@ -309,18 +364,18 @@ func filterSecretVars(m *manifest.Manifest) *manifest.Manifest {
 	out.Volumes = append([]string(nil), m.Volumes...)
 	out.Networks = append([]string(nil), m.Networks...)
 
-	out.Groups = make(map[string]manifest.Group, len(m.Groups))
-	for groupKey, group := range m.Groups {
-		filteredVars := make([]manifest.Var, 0, len(group.Vars))
-		for _, v := range group.Vars {
+	out.Sets = make(map[string]manifest.Set, len(m.Sets))
+	for setKey, set := range m.Sets {
+		filteredVars := make([]manifest.Var, 0, len(set.Vars))
+		for _, v := range set.Vars {
 			if v.IsSecret() {
 				continue
 			}
 			filteredVars = append(filteredVars, v)
 		}
 
-		group.Vars = filteredVars
-		out.Groups[groupKey] = group
+		set.Vars = filteredVars
+		out.Sets[setKey] = set
 	}
 
 	return &out
