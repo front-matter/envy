@@ -96,11 +96,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"https://example.org/common",
 		"## Variables",
 		"title=\"APP_ENV\"",
-		"link=\"#variable-details\"",
-		"## Variable details",
+		"link=\"#app_env\"",
 		"### APP_ENV",
-		"- Default: `production`",
-		"- Example: `staging`",
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {

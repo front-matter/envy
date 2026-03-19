@@ -387,7 +387,7 @@ func generateHomeMarkdown(m *manifest.Manifest) string {
 	body.WriteString("\n### Group cards\n\n")
 	body.WriteString(renderCardsOpen(3))
 	for _, group := range m.OrderedGroups() {
-		description := strings.TrimSpace(defaultString(group.Description, fmt.Sprintf("%d variables", len(group.Vars))))
+		description := strings.TrimSpace(defaultString(group.Description, "Group configuration"))
 		body.WriteString(renderCard(group.Key, "/groups/"+sanitizeGroupPageName(group.Key)+"/", groupIcon(group.Key), description))
 	}
 	body.WriteString(renderCardsClose())
@@ -414,7 +414,7 @@ func generateGroupsIndexMarkdown(m *manifest.Manifest) string {
 	body.WriteString("- [Back to home](/)\n\n")
 	body.WriteString(renderCardsOpen(3))
 	for _, group := range m.OrderedGroups() {
-		description := strings.TrimSpace(defaultString(group.Description, fmt.Sprintf("%d variables", len(group.Vars))))
+		description := strings.TrimSpace(defaultString(group.Description, "Group configuration"))
 		body.WriteString(renderCard(group.Key, "/groups/"+sanitizeGroupPageName(group.Key)+"/", groupIcon(group.Key), description))
 	}
 	body.WriteString(renderCardsClose())
@@ -460,28 +460,11 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 		body.WriteString("This group does not define variables.\n")
 		return body.String()
 	}
-	body.WriteString(renderCardsOpen(2))
-	for _, variable := range group.Vars {
-		body.WriteString(renderCard(variable.Key, "#variable-details", "tag", variableCardSubtitle(variable)))
-	}
-	body.WriteString(renderCardsClose())
-	body.WriteString("\n## Variable details\n\n")
-
 	for _, variable := range group.Vars {
 		body.WriteString(fmt.Sprintf("### %s\n\n", variable.Key))
-		if strings.TrimSpace(variable.Description) != "" {
-			body.WriteString(strings.TrimSpace(variable.Description) + "\n\n")
-		}
-		if variable.IsSecret() {
-			body.WriteString("- Default: hidden for secret values\n")
-		} else {
-			body.WriteString(fmt.Sprintf("- Default: `%s`\n", variable.DefaultString()))
-		}
-		body.WriteString(fmt.Sprintf("- Required: %t\n", variable.IsRequired()))
-		body.WriteString(fmt.Sprintf("- Secret: %t\n", variable.IsSecret()))
-		if strings.TrimSpace(variable.Example) != "" {
-			body.WriteString(fmt.Sprintf("- Example: `%s`\n", strings.TrimSpace(variable.Example)))
-		}
+		body.WriteString(renderCardsOpen(1))
+		body.WriteString(renderCard(variable.Key, "#"+variableHeadingAnchor(variable.Key), "tag", variableCardSubtitle(variable)))
+		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
 
@@ -597,6 +580,12 @@ func variableCardSubtitle(variable manifest.Var) string {
 		return "Variable definition"
 	}
 	return strings.Join(parts, " · ")
+}
+
+func variableHeadingAnchor(key string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(key))
+	trimmed = strings.ReplaceAll(trimmed, " ", "-")
+	return trimmed
 }
 
 func servicesForGroup(m *manifest.Manifest, groupKey string) []string {
