@@ -28,7 +28,24 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
 .vscode/
+.idea/
+*.swp
+*.swo
+
 # Added by goreleaser init:
 dist/
+
+# Build output
+public/
+resources/_gen/
+
+# Hugo module cache
+.hugo_build.lock
+
+# Hugo modules (Go modules)
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
