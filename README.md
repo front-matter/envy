@@ -64,6 +64,7 @@ Commands:
 
 Global flags:
   -m, --manifest string   Path to env.yaml (auto-detected if not given)
+  -v, --version           version for envy
 ```
 
 ### Workflow
@@ -111,6 +112,9 @@ envy secrets
 
 # Scan git-tracked files for exposed secrets
 envy secrets --check
+
+# Print envy version
+envy --version
 
 # Build documentation site for env.yaml
 # If docs/index.md exists next to env.yaml, it is used as the docs home page.

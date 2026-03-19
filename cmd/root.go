@@ -28,6 +28,7 @@ produces documentation, and audits secrets.
 	envy validate .env.prod
 	envy build --destination public
 	envy secrets --check
+	envy --version
 	envy server --bind 0.0.0.0
 	envy deploy --target production`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -44,6 +45,11 @@ func Execute() {
 }
 
 func init() {
+	rootCmd.InitDefaultVersionFlag()
+	if versionFlag := rootCmd.Flags().Lookup("version"); versionFlag != nil {
+		versionFlag.Shorthand = "v"
+	}
+
 	rootCmd.PersistentFlags().StringVarP(
 		&manifestPath, "manifest", "m", "",
 		"Path to env.yaml (auto-detected if not given)",
