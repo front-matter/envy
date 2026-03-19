@@ -15,8 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const hextraModulePath = "github.com/imfing/hextra"
-
 var buildCmd = &cobra.Command{
 	Use:                "build [hugo flags]",
 	Short:              "Forward to hugo build",
@@ -59,12 +57,7 @@ func runHugoCommand(subcommand string, args []string) error {
 		return fmt.Errorf("hugo executable not found in PATH: %w", err)
 	}
 
-	if err := ensureHextraModule(hugoPath); err != nil {
-		return err
-	}
-
-	buildConfigPath := ""
-	buildContentDir := ""
+	buildSiteDir := ""
 	if subcommand == "build" {
 		if hasConfigFlag(args) {
 			return fmt.Errorf("envy build uses env.yaml as Hugo config source; remove --config/-c")
@@ -75,18 +68,22 @@ func runHugoCommand(subcommand string, args []string) error {
 			return err
 		}
 
-		buildConfigPath, buildContentDir, err = prepareBuildAssets(manifestFilePath)
+		buildSiteDir, err = prepareBuildAssets(manifestFilePath)
 		if err != nil {
 			return err
 		}
-		defer os.Remove(buildConfigPath)
-		defer os.RemoveAll(buildContentDir)
+		defer os.RemoveAll(buildSiteDir)
 	}
 
-	allArgs := make([]string, 0, len(args)+1)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("determining working directory: %w", err)
+	}
+
+	allArgs := make([]string, 0, len(args)+3)
 	allArgs = append(allArgs, subcommand)
 	if subcommand == "build" {
-		allArgs = append(allArgs, "--config", buildConfigPath)
+		allArgs = append(allArgs, "--destination", filepath.Join(cwd, "public"))
 	}
 	allArgs = append(allArgs, args...)
 
@@ -94,6 +91,16 @@ func runHugoCommand(subcommand string, args []string) error {
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
+	if subcommand == "build" {
+		command.Dir = buildSiteDir
+		// Force vendor mode and skip checksum DB so Hugo uses the embedded
+		// _vendor/ tree without any network access.
+		command.Env = append(os.Environ(),
+			"GOFLAGS=-mod=vendor",
+			"GONOSUMDB=*",
+			"GONOSUMCHECK=*",
+		)
+	}
 
 	if err := command.Run(); err != nil {
 		var exitErr *exec.ExitError
@@ -101,20 +108,6 @@ func runHugoCommand(subcommand string, args []string) error {
 			return fmt.Errorf("hugo %s exited with code %d", subcommand, exitErr.ExitCode())
 		}
 		return fmt.Errorf("running hugo %s: %w", subcommand, err)
-	}
-
-	return nil
-}
-
-func ensureHextraModule(hugoPath string) error {
-	// Keep Hextra available in the active Hugo site before running forwarded commands.
-	command := exec.Command(hugoPath, "mod", "get", hextraModulePath)
-	command.Stdin = os.Stdin
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("adding hugo module %s: %w", hextraModulePath, err)
 	}
 
 	return nil
@@ -159,7 +152,6 @@ type hugoGeneratedConfig struct {
 	LanguageCode           string            `yaml:"languageCode,omitempty"`
 	DefaultContentLanguage string            `yaml:"defaultContentLanguage,omitempty"`
 	Title                  string            `yaml:"title,omitempty"`
-	ContentDir             string            `yaml:"contentDir,omitempty"`
 	Module                 hugoGeneratedMods `yaml:"module"`
 }
 
@@ -171,36 +163,90 @@ type hugoGeneratedImport struct {
 	Path string `yaml:"path"`
 }
 
-func prepareBuildAssets(path string) (string, string, error) {
+func prepareBuildAssets(path string) (string, error) {
 	m, err := manifest.Load(path)
 	if err != nil {
-		return "", "", err
+		return "", err
+	}
+
+	siteDir, err := os.MkdirTemp("", "envy-hugo-site-*")
+	if err != nil {
+		return "", fmt.Errorf("creating temporary Hugo site directory: %w", err)
+	}
+
+	if err := extractDocsFS(siteDir); err != nil {
+		os.RemoveAll(siteDir)
+		return "", err
+	}
+
+	// Write the Hugo site go.mod (not embedded to avoid Go module boundary error).
+	siteGoMod := "module github.com/front-matter/envy/docs\n\ngo 1.21\n\nrequire github.com/imfing/hextra v0.12.1\n"
+	if err := os.WriteFile(filepath.Join(siteDir, "go.mod"), []byte(siteGoMod), 0o644); err != nil {
+		os.RemoveAll(siteDir)
+		return "", fmt.Errorf("writing Hugo site go.mod: %w", err)
 	}
 
 	contentDir, err := prepareBuildContentDir(".", m)
 	if err != nil {
-		return "", "", err
+		os.RemoveAll(siteDir)
+		return "", err
+	}
+	defer os.RemoveAll(contentDir)
+
+	if err := copyDirIfExists(contentDir, filepath.Join(siteDir, "content")); err != nil {
+		os.RemoveAll(siteDir)
+		return "", err
 	}
 
-	configPath, err := writeTempHugoConfigFromManifest(m, contentDir)
-	if err != nil {
-		os.RemoveAll(contentDir)
-		return "", "", err
+	if err := copyDirIfExists("data", filepath.Join(siteDir, "data")); err != nil {
+		os.RemoveAll(siteDir)
+		return "", err
 	}
 
-	return configPath, contentDir, nil
+	if err := writeTempHugoConfigFromManifest(m, siteDir); err != nil {
+		os.RemoveAll(siteDir)
+		return "", err
+	}
+
+	return siteDir, nil
 }
 
-func writeTempHugoConfigFromManifest(m *manifest.Manifest, contentDir string) (string, error) {
+func extractDocsFS(dst string) error {
+	sub, err := fs.Sub(docsFS, "docs")
+	if err != nil {
+		return fmt.Errorf("accessing embedded docs: %w", err)
+	}
+	return fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == "." {
+			return nil
+		}
+		target := filepath.Join(dst, path)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, readErr := fs.ReadFile(sub, path)
+		if readErr != nil {
+			return fmt.Errorf("reading embedded %s: %w", path, readErr)
+		}
+		if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
+			return mkErr
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+}
+
+func writeTempHugoConfigFromManifest(m *manifest.Manifest, siteDir string) error {
 	lookup := make(map[string]manifest.Var)
 	for _, v := range m.AllVars() {
 		lookup[v.Key] = v
 	}
 
 	config := hugoGeneratedConfig{
-		ContentDir: contentDir,
 		Module: hugoGeneratedMods{
-			Imports: []hugoGeneratedImport{{Path: hextraModulePath}},
+			Imports: []hugoGeneratedImport{{Path: "github.com/imfing/hextra"}},
 		},
 	}
 
@@ -222,20 +268,14 @@ func writeTempHugoConfigFromManifest(m *manifest.Manifest, contentDir string) (s
 
 	content, err := yaml.Marshal(config)
 	if err != nil {
-		return "", fmt.Errorf("rendering temporary Hugo config: %w", err)
+		return fmt.Errorf("rendering Hugo config: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp("", "envy-hugo-*.yaml")
-	if err != nil {
-		return "", fmt.Errorf("creating temporary Hugo config: %w", err)
-	}
-	defer tmpFile.Close()
-
-	if _, err := tmpFile.Write(content); err != nil {
-		return "", fmt.Errorf("writing temporary Hugo config: %w", err)
+	if err := os.WriteFile(filepath.Join(siteDir, "hugo.yaml"), content, 0o644); err != nil {
+		return fmt.Errorf("writing Hugo config: %w", err)
 	}
 
-	return tmpFile.Name(), nil
+	return nil
 }
 
 func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, error) {
