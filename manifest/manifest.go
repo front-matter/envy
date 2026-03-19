@@ -136,15 +136,25 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 
 // Meta holds project-level metadata.
 type Meta struct {
-	Name        string `yaml:"name,omitempty"`
-	Description string `yaml:"description,omitempty"`
-	Version     string `yaml:"version,omitempty"`
-	Docs        string `yaml:"docs,omitempty"`
+	Title        string `yaml:"title,omitempty"`
+	Docs         string `yaml:"docs,omitempty"`
+	Author       string `yaml:"author,omitempty"`
+	LanguageCode string `yaml:"languageCode,omitempty"`
+	Description  string `yaml:"description,omitempty"`
+	Version      string `yaml:"version,omitempty"`
 }
 
 // VersionLabel returns the configured version label.
 func (m Meta) VersionLabel() string {
 	return m.Version
+}
+
+// LanguageCodeLabel returns languageCode with en-US default.
+func (m Meta) LanguageCodeLabel() string {
+	if strings.TrimSpace(m.LanguageCode) == "" {
+		return "en-US"
+	}
+	return m.LanguageCode
 }
 
 // Service describes a runtime service and the groups it uses.
@@ -264,11 +274,13 @@ func isValidImageReference(value string) bool {
 type Group struct {
 	Key         string `yaml:"-"`
 	Description string `yaml:"description,omitempty"`
+	Link        string `yaml:"link,omitempty"`
 	Vars        []Var  `yaml:"vars,omitempty"`
 }
 
 type groupYAML struct {
 	Description string     `yaml:"description,omitempty"`
+	Link        string     `yaml:"link,omitempty"`
 	Vars        *yaml.Node `yaml:"vars,omitempty"`
 }
 
@@ -372,6 +384,9 @@ func encodeGroupNode(group Group) (*yaml.Node, error) {
 	if group.Description != "" {
 		appendMapping(groupNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: group.Description})
 	}
+	if group.Link != "" {
+		appendMapping(groupNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: group.Link})
+	}
 	if len(group.Vars) > 0 {
 		varsNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, v := range group.Vars {
@@ -439,6 +454,10 @@ func decodeGroupNode(node *yaml.Node) (Group, error) {
 		switch key {
 		case "description":
 			if err := value.Decode(&out.Description); err != nil {
+				return out, err
+			}
+		case "link":
+			if err := value.Decode(&out.Link); err != nil {
 				return out, err
 			}
 		case "vars":

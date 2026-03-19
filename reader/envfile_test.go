@@ -26,8 +26,8 @@ DATABASE_URL=postgres://localhost/mydb
 	}
 
 	// Verify manifest
-	if m.Meta.Name != "Imported Env Manifest" {
-		t.Errorf("expected 'Imported Env Manifest', got %s", m.Meta.Name)
+	if m.Meta.Title != "Imported Env Manifest" {
+		t.Errorf("expected 'Imported Env Manifest', got %s", m.Meta.Title)
 	}
 
 	group, ok := m.Groups["env"]

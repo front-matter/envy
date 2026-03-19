@@ -57,7 +57,9 @@ Commands:
   compose     Generate a Docker Compose file from env.yaml
   generate    Generate a .env file from env.yaml
   secrets     List or audit secret environment variables
-  docs        Generate environment variable documentation
+  build       Generate documentation site for env.yaml file
+  server      Run local documentation site generated from env.yaml
+  deploy      Deploy documentation site to GitHub Pages
   completion  Generate shell completion scripts
 
 Global flags:
@@ -111,9 +113,14 @@ envy secrets
 # Scan git-tracked files for exposed secrets
 envy secrets --check
 
-# Generate reference documentation
-envy docs -o docs/ENV.md
-```
+# Build documentation site for env.yaml
+envy build --destination public
+
+# Run local documentation site
+envy server --bind 0.0.0.0
+
+# Deploy documentation site to GitHub Pages
+envy deploy --target production
 
 If the imported compose file contains a top-level `sops` block, `envy import` automatically decrypts it before parsing.
 
@@ -123,10 +130,11 @@ If the imported compose file contains a top-level `sops` block, `envy import` au
 
 ```yaml
 meta:
-  name: InvenioRDM Starter
+  title: InvenioRDM Starter
   description: Environment configuration
   version: "v13.0.8.1"
   docs: https://inveniordm.docs.cern.ch/reference/configuration/
+  languageCode: en-US
 
 services:
   web:

@@ -9,7 +9,7 @@ import (
 
 func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 	m := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "Example"},
+		Meta: manifest.Meta{Title: "Example"},
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{

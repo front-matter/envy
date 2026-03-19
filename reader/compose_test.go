@@ -115,8 +115,8 @@ services:
 		t.Fatalf("ImportCompose() error = %v", err)
 	}
 
-	if m.Meta.Name != "My Project" {
-		t.Fatalf("expected meta.name 'My Project', got %q", m.Meta.Name)
+	if m.Meta.Title != "My Project" {
+		t.Fatalf("expected meta.title 'My Project', got %q", m.Meta.Title)
 	}
 
 	if m.Meta.Description != "A multi-line\ndescription here" {
@@ -144,8 +144,8 @@ func TestImportComposeNoHeaderComments(t *testing.T) {
 		t.Fatalf("ImportCompose() error = %v", err)
 	}
 
-	if m.Meta.Name != "Imported Compose Manifest" {
-		t.Fatalf("expected default meta.name, got %q", m.Meta.Name)
+	if m.Meta.Title != "Imported Compose Manifest" {
+		t.Fatalf("expected default meta.title, got %q", m.Meta.Title)
 	}
 
 	if m.Meta.Description != "" {

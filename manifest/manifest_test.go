@@ -37,7 +37,7 @@ func TestStringDefaultUnmarshalYAML(t *testing.T) {
 func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 	m := Manifest{
 		Meta: Meta{
-			Name:    "Imported Compose Manifest",
+			Title:   "Imported Compose Manifest",
 			Version: "v1",
 		},
 		Services: []Service{{
@@ -82,7 +82,7 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 
 func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 	m := Manifest{
-		Meta: Meta{Name: "Imported Compose Manifest", Version: "v1"},
+		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
 		Services: []Service{
 			{Name: "web", Groups: []string{"web"}},
 			{Name: "cache", Groups: []string{"cache"}},
@@ -113,7 +113,7 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 
 func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	m := Manifest{
-		Meta: Meta{Name: "Imported Env Manifest", Version: "v1"},
+		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
 		Groups: map[string]Group{
 			"env": {
 				Vars: []Var{
@@ -168,7 +168,7 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 
 func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 	m := Manifest{
-		Meta: Meta{Name: "Imported Compose Manifest", Version: "v1"},
+		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
 		Services: []Service{{
 			Name:    "worker",
 			Image:   "ghcr.io/example/worker:latest",
@@ -202,7 +202,7 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 
 func TestManifestMarshalVolumesAsComposeStyleMap(t *testing.T) {
 	m := Manifest{
-		Meta:    Meta{Name: "Imported Compose Manifest", Version: "v1"},
+		Meta:    Meta{Title: "Imported Compose Manifest", Version: "v1"},
 		Volumes: []string{"app_data", "uploaded_data"},
 	}
 
@@ -223,7 +223,7 @@ func TestManifestMarshalVolumesAsComposeStyleMap(t *testing.T) {
 func TestManifestLoadVolumesFromComposeStyleMap(t *testing.T) {
 	input := strings.Join([]string{
 		"meta:",
-		"  name: Example",
+		"  title: Example",
 		"  version: v1",
 		"volumes:",
 		"  app_data:",
@@ -243,7 +243,7 @@ func TestManifestLoadVolumesFromComposeStyleMap(t *testing.T) {
 func TestManifestLoadServicesAndVars(t *testing.T) {
 	input := strings.Join([]string{
 		"meta:",
-		"  name: Example",
+		"  title: Example",
 		"  version: v1",
 		"services:",
 		"  web:",
@@ -282,9 +282,44 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	}
 }
 
+func TestManifestLoadGroupLink(t *testing.T) {
+	input := strings.Join([]string{
+		"meta:",
+		"  title: Example",
+		"groups:",
+		"  common:",
+		"    description: Shared settings",
+		"    link: https://example.org/common",
+		"    vars:",
+		"      APP_ENV:",
+		"        default: production",
+	}, "\n")
+
+	var m Manifest
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	group, ok := m.Groups["common"]
+	if !ok {
+		t.Fatalf("expected common group")
+	}
+	if group.Link != "https://example.org/common" {
+		t.Fatalf("expected group link to be preserved, got %q", group.Link)
+	}
+
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(data), "link: https://example.org/common") {
+		t.Fatalf("expected marshaled YAML to contain group link, got:\n%s", string(data))
+	}
+}
+
 func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 	m := Manifest{
-		Meta: Meta{Name: "Imported Compose Manifest", Version: "v1"},
+		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
 		Groups: map[string]Group{
 			"web": {
 				Vars: []Var{{
@@ -308,7 +343,7 @@ func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 
 func TestManifestMarshalOmitsImportedEnvFileVarDescription(t *testing.T) {
 	m := Manifest{
-		Meta: Meta{Name: "Imported Env Manifest", Version: "v1"},
+		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
 		Groups: map[string]Group{
 			"env": {
 				Vars: []Var{{

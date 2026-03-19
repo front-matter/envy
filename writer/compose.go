@@ -71,7 +71,7 @@ func GenerateCompose(m *manifest.Manifest, opts ComposeOptions) string {
 }
 
 func writeComposeHeaderMeta(sb *strings.Builder, m *manifest.Manifest) {
-	writeCommentLines(sb, m.Meta.Name)
+	writeCommentLines(sb, m.Meta.Title)
 	writeCommentLines(sb, m.Meta.Description)
 
 	version := strings.TrimSpace(m.Meta.VersionLabel())

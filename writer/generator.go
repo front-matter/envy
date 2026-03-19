@@ -17,7 +17,7 @@ type Options struct {
 func Generate(m *manifest.Manifest, opts Options) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# %s — Environment Configuration\n", m.Meta.Name))
+	sb.WriteString(fmt.Sprintf("# %s — Environment Configuration\n", m.Meta.Title))
 	sb.WriteString("# Generated from env.yaml — edit env.yaml, not this file.\n")
 	sb.WriteString(fmt.Sprintf("# Version: %s\n", m.Meta.VersionLabel()))
 	sb.WriteString(fmt.Sprintf("# Docs: %s\n", m.Meta.Docs))

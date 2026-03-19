@@ -27,9 +27,9 @@ func Render(m *manifest.Manifest, format string) (string, error) {
 func renderMarkdown(m *manifest.Manifest) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# %s — Environment Variable Reference\n\n", m.Meta.Name))
+	sb.WriteString(fmt.Sprintf("# %s — Environment Variable Reference\n\n", m.Meta.Title))
 	sb.WriteString(fmt.Sprintf(
-		"> %s · [Upstream docs](%s)\n\n",
+		"> %s · %s\n\n",
 		m.Meta.VersionLabel(), m.Meta.Docs,
 	))
 
@@ -69,7 +69,7 @@ func renderMarkdown(m *manifest.Manifest) string {
 func renderRST(m *manifest.Manifest) string {
 	var sb strings.Builder
 
-	title := fmt.Sprintf("%s Environment Variables", m.Meta.Name)
+	title := fmt.Sprintf("%s Environment Variables", m.Meta.Title)
 	sb.WriteString(title + "\n")
 	sb.WriteString(strings.Repeat("=", len(title)) + "\n\n")
 

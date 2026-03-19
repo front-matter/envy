@@ -10,7 +10,7 @@ import (
 func TestGenerateComposeIncludesCommentsAndLists(t *testing.T) {
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{
-			Name:        "Example App",
+			Title:       "Example App",
 			Description: "Example description",
 			Version:     "v1.2.3",
 			Docs:        "https://example.org/docs",

@@ -31,8 +31,8 @@ APP_NAME=TestApp
 	}
 
 	// Verify manifest structure
-	if m.Meta.Name != "Imported Env Manifest" {
-		t.Errorf("expected name 'Imported Env Manifest', got %s", m.Meta.Name)
+	if m.Meta.Title != "Imported Env Manifest" {
+		t.Errorf("expected name 'Imported Env Manifest', got %s", m.Meta.Title)
 	}
 
 	if len(m.Groups) != 1 {
@@ -57,7 +57,7 @@ APP_NAME=TestApp
 
 func TestMergeManifests(t *testing.T) {
 	env1 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "env1", Version: "v1"},
+		Meta: manifest.Meta{Title: "env1", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"db": {
 				Vars: []manifest.Var{
@@ -69,7 +69,7 @@ func TestMergeManifests(t *testing.T) {
 	}
 
 	env2 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "env2", Version: "v1"},
+		Meta: manifest.Meta{Title: "env2", Version: "v1"},
 		Services: []manifest.Service{
 			{Name: "web", Image: "nginx:latest"},
 		},
@@ -113,7 +113,7 @@ func TestMergeManifests(t *testing.T) {
 
 func TestMergeEmptyManifests(t *testing.T) {
 	m1 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "m1", Version: "v1"},
+		Meta: manifest.Meta{Title: "m1", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
@@ -144,7 +144,7 @@ func TestMergeEmptyManifests(t *testing.T) {
 
 func TestMergeThreeManifests(t *testing.T) {
 	m1 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "m1", Version: "v1"},
+		Meta: manifest.Meta{Title: "m1", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
@@ -155,7 +155,7 @@ func TestMergeThreeManifests(t *testing.T) {
 	}
 
 	m2 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "m2", Version: "v1"},
+		Meta: manifest.Meta{Title: "m2", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
@@ -166,7 +166,7 @@ func TestMergeThreeManifests(t *testing.T) {
 	}
 
 	m3 := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "m3", Version: "v1"},
+		Meta: manifest.Meta{Title: "m3", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"app": {
 				Vars: []manifest.Var{
@@ -194,7 +194,7 @@ func TestMergeThreeManifests(t *testing.T) {
 
 func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 	compose := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "compose", Version: "v1"},
+		Meta: manifest.Meta{Title: "compose", Version: "v1"},
 		Services: []manifest.Service{
 			{Name: "web", Groups: []string{"web"}},
 		},
@@ -209,7 +209,7 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeGroups(t *testing.T) {
 	}
 
 	envFile := &manifest.Manifest{
-		Meta: manifest.Meta{Name: "env", Version: "v1"},
+		Meta: manifest.Meta{Title: "env", Version: "v1"},
 		Groups: map[string]manifest.Group{
 			"env": {
 				Vars: []manifest.Var{

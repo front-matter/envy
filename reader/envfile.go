@@ -39,9 +39,10 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{
-			Name:        "Imported Env Manifest",
-			Description: fmt.Sprintf("Generated from %s", path),
-			Version:     "v1",
+			Title:        "Imported Env Manifest",
+			Description:  fmt.Sprintf("Generated from %s", path),
+			LanguageCode: "en-US",
+			Version:      "v1",
 		},
 		Groups: map[string]manifest.Group{
 			"env": {

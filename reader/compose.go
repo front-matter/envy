@@ -62,16 +62,17 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 	volumes := sortedKeys(project.Volumes)
 	networks := sortedKeys(project.Networks)
 
-	metaName, metaDescription := extractComposeHeaderComments(composeContent)
-	if metaName == "" {
-		metaName = "Imported Compose Manifest"
+	metaTitle, metaDescription := extractComposeHeaderComments(composeContent)
+	if metaTitle == "" {
+		metaTitle = "Imported Compose Manifest"
 	}
 
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{
-			Name:        metaName,
-			Description: metaDescription,
-			Version:     "v1",
+			Title:        metaTitle,
+			Description:  metaDescription,
+			LanguageCode: "en-US",
+			Version:      "v1",
 		},
 		Services: make([]manifest.Service, 0, len(serviceNames)),
 		Groups:   make(map[string]manifest.Group),

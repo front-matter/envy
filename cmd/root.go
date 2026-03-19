@@ -24,8 +24,10 @@ produces documentation, and audits secrets.
 	envy compose --flavor coolify --without-service db,cache
 	envy generate --no-secrets > .env.example
 	envy validate .env.prod
-	envy docs -o docs/ENV.md
-	envy secrets --check`,
+	envy build --destination public
+	envy secrets --check
+	envy server --bind 0.0.0.0
+	envy deploy --target production`,
 }
 
 // Execute is the entry point called by main.
