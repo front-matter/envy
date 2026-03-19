@@ -58,7 +58,7 @@ func runHugoCommand(subcommand string, args []string) error {
 	}
 
 	buildSiteDir := ""
-	if subcommand == "build" || subcommand == "server" {
+	if usesGeneratedHugoSite(subcommand) {
 		if hasConfigFlag(args) {
 			return fmt.Errorf("envy %s uses env.yaml as Hugo config source; remove --config/-c", subcommand)
 		}
@@ -91,7 +91,7 @@ func runHugoCommand(subcommand string, args []string) error {
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	if subcommand == "build" || subcommand == "server" {
+	if usesGeneratedHugoSite(subcommand) {
 		command.Dir = buildSiteDir
 		// Force vendor mode and skip checksum DB so Hugo uses the embedded
 		// _vendor/ tree without any network access.
@@ -111,6 +111,10 @@ func runHugoCommand(subcommand string, args []string) error {
 	}
 
 	return nil
+}
+
+func usesGeneratedHugoSite(subcommand string) bool {
+	return subcommand == "build" || subcommand == "server" || subcommand == "deploy"
 }
 
 func hasConfigFlag(args []string) bool {
@@ -153,6 +157,8 @@ func prepareBuildAssets(path string) (string, error) {
 		return "", err
 	}
 
+	manifestDir := filepath.Dir(path)
+
 	siteDir, err := os.MkdirTemp("", "envy-hugo-site-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temporary Hugo site directory: %w", err)
@@ -170,7 +176,7 @@ func prepareBuildAssets(path string) (string, error) {
 		return "", fmt.Errorf("writing Hugo site go.mod: %w", err)
 	}
 
-	contentDir, err := prepareBuildContentDir(".", m)
+	contentDir, err := prepareBuildContentDir(manifestDir, m)
 	if err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
@@ -182,7 +188,7 @@ func prepareBuildAssets(path string) (string, error) {
 		return "", err
 	}
 
-	if err := copyDirIfExists("data", filepath.Join(siteDir, "data")); err != nil {
+	if err := copyDirIfExists(filepath.Join(manifestDir, "data"), filepath.Join(siteDir, "data")); err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
 	}
@@ -278,6 +284,12 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 		return "", err
 	}
 
+	customDocsIndex := filepath.Join(siteRoot, "docs", "index.md")
+	if err := copyFileIfExists(customDocsIndex, filepath.Join(tmpDir, "_index.md")); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+
 	groupsDir := filepath.Join(tmpDir, "groups")
 	if err := os.MkdirAll(groupsDir, 0o755); err != nil {
 		os.RemoveAll(tmpDir)
@@ -303,6 +315,21 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 	}
 
 	return tmpDir, nil
+}
+
+func copyFileIfExists(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("checking file %s: %w", src, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("file path %s is a directory", src)
+	}
+
+	return copyFile(src, dst)
 }
 
 func copyDirIfExists(src, dst string) error {

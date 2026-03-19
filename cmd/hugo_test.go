@@ -146,6 +146,57 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 	}
 }
 
+func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
+	siteRoot := t.TempDir()
+	docsDir := filepath.Join(siteRoot, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(docs): %v", err)
+	}
+	customHome := "# Custom Docs Home\n"
+	if err := os.WriteFile(filepath.Join(docsDir, "index.md"), []byte(customHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(docs/index.md): %v", err)
+	}
+
+	m := &manifest.Manifest{
+		Meta: manifest.Meta{Title: "Example"},
+	}
+
+	contentDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+
+	homeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(_index.md): %v", err)
+	}
+	if string(homeContent) != customHome {
+		t.Fatalf("expected docs/index.md to override generated home page, got:\n%s", string(homeContent))
+	}
+
+	if err := os.RemoveAll(contentDir); err != nil {
+		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
+func TestUsesGeneratedHugoSite(t *testing.T) {
+	tests := []struct {
+		subcommand string
+		want       bool
+	}{
+		{subcommand: "build", want: true},
+		{subcommand: "server", want: true},
+		{subcommand: "deploy", want: true},
+		{subcommand: "version", want: false},
+	}
+
+	for _, tt := range tests {
+		if got := usesGeneratedHugoSite(tt.subcommand); got != tt.want {
+			t.Fatalf("usesGeneratedHugoSite(%q) = %v, want %v", tt.subcommand, got, tt.want)
+		}
+	}
+}
+
 func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	siteDir := t.TempDir()
 	m := &manifest.Manifest{

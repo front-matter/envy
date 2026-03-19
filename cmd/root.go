@@ -11,6 +11,7 @@ var manifestPath string
 
 var rootCmd = &cobra.Command{
 	Use:           "envy",
+	Version:       Version,
 	Short:         "Environment variable manager",
 	SilenceErrors: true,
 	Long: `envy manages environment variables via a structured env.yaml 

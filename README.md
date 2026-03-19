@@ -113,6 +113,7 @@ envy secrets
 envy secrets --check
 
 # Build documentation site for env.yaml
+# If docs/index.md exists next to env.yaml, it is used as the docs home page.
 envy build --destination public
 
 # Run local documentation site
