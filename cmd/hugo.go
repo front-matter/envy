@@ -58,9 +58,9 @@ func runHugoCommand(subcommand string, args []string) error {
 	}
 
 	buildSiteDir := ""
-	if subcommand == "build" {
+	if subcommand == "build" || subcommand == "server" {
 		if hasConfigFlag(args) {
-			return fmt.Errorf("envy build uses env.yaml as Hugo config source; remove --config/-c")
+			return fmt.Errorf("envy %s uses env.yaml as Hugo config source; remove --config/-c", subcommand)
 		}
 
 		manifestFilePath, err := resolveBuildManifestPath()
@@ -91,7 +91,7 @@ func runHugoCommand(subcommand string, args []string) error {
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	if subcommand == "build" {
+	if subcommand == "build" || subcommand == "server" {
 		command.Dir = buildSiteDir
 		// Force vendor mode and skip checksum DB so Hugo uses the embedded
 		// _vendor/ tree without any network access.
@@ -145,22 +145,6 @@ func resolveBuildManifestPath() (string, error) {
 	}
 
 	return path, nil
-}
-
-type hugoGeneratedConfig struct {
-	BaseURL                string            `yaml:"baseURL,omitempty"`
-	LanguageCode           string            `yaml:"languageCode,omitempty"`
-	DefaultContentLanguage string            `yaml:"defaultContentLanguage,omitempty"`
-	Title                  string            `yaml:"title,omitempty"`
-	Module                 hugoGeneratedMods `yaml:"module"`
-}
-
-type hugoGeneratedMods struct {
-	Imports []hugoGeneratedImport `yaml:"imports,omitempty"`
-}
-
-type hugoGeneratedImport struct {
-	Path string `yaml:"path"`
 }
 
 func prepareBuildAssets(path string) (string, error) {
@@ -244,26 +228,30 @@ func writeTempHugoConfigFromManifest(m *manifest.Manifest, siteDir string) error
 		lookup[v.Key] = v
 	}
 
-	config := hugoGeneratedConfig{
-		Module: hugoGeneratedMods{
-			Imports: []hugoGeneratedImport{{Path: "github.com/imfing/hextra"}},
+	config := map[string]interface{}{
+		"module": map[string]interface{}{
+			"imports": []map[string]string{{"path": "github.com/imfing/hextra"}},
 		},
 	}
 
 	if m.Meta.Docs != "" {
-		config.BaseURL = m.Meta.Docs
+		config["baseURL"] = m.Meta.Docs
 	}
-	config.LanguageCode = m.Meta.LanguageCodeLabel()
+	config["languageCode"] = m.Meta.LanguageCodeLabel()
 	if v, ok := lookup["HUGO_LANGUAGE_CODE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config.LanguageCode = v.DefaultString()
+		config["languageCode"] = v.DefaultString()
 	}
 	if v, ok := lookup["HUGO_DEFAULT_CONTENT_LANGUAGE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config.DefaultContentLanguage = v.DefaultString()
+		config["defaultContentLanguage"] = v.DefaultString()
 	}
 	if v, ok := lookup["HUGO_TITLE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config.Title = v.DefaultString()
+		config["title"] = v.DefaultString()
 	} else if strings.TrimSpace(m.Meta.Title) != "" {
-		config.Title = m.Meta.Title
+		config["title"] = m.Meta.Title
+	}
+
+	if len(m.Meta.IgnoreLogs) > 0 {
+		config["ignoreLogs"] = m.Meta.IgnoreLogs
 	}
 
 	content, err := yaml.Marshal(config)
@@ -501,7 +489,7 @@ func generateGroupMarkdown(m *manifest.Manifest, group manifest.Group) string {
 		return body.String()
 	}
 	for _, variable := range group.Vars {
-		body.WriteString(fmt.Sprintf("### %s\n\n", variable.Key))
+		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
 		body.WriteString(renderCard(variable.Key, "#"+variableHeadingAnchor(variable.Key), "tag", variableCardSubtitle(variable)))
 		body.WriteString(renderCardsClose())

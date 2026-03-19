@@ -85,8 +85,8 @@ EMPTY_VALUE=
 
 	group := m.Groups["env"]
 	for _, v := range group.Vars {
-		if v.Default == "" && v.Key != "EMPTY_VALUE" {
-			t.Errorf("%s: expected default value to be preserved", v.Key)
+		if v.Default != "" {
+			t.Errorf("%s: expected secret defaults to be empty, got %q", v.Key, v.Default)
 		}
 		if v.Secret != "true" {
 			t.Errorf("%s: expected secret to be string \"true\", got %q", v.Key, v.Secret)

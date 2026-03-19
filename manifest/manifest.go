@@ -136,12 +136,13 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 
 // Meta holds project-level metadata.
 type Meta struct {
-	Title        string `yaml:"title,omitempty"`
-	Docs         string `yaml:"docs,omitempty"`
-	Author       string `yaml:"author,omitempty"`
-	LanguageCode string `yaml:"languageCode,omitempty"`
-	Description  string `yaml:"description,omitempty"`
-	Version      string `yaml:"version,omitempty"`
+	Title        string   `yaml:"title,omitempty"`
+	Docs         string   `yaml:"docs,omitempty"`
+	Author       string   `yaml:"author,omitempty"`
+	LanguageCode string   `yaml:"languageCode,omitempty"`
+	Description  string   `yaml:"description,omitempty"`
+	Version      string   `yaml:"version,omitempty"`
+	IgnoreLogs   []string `yaml:"ignoreLogs,omitempty"`
 }
 
 // VersionLabel returns the configured version label.
@@ -309,11 +310,30 @@ type Var struct {
 	Default     string `yaml:"default,omitempty"`
 	Required    string `yaml:"required,omitempty"`
 	Secret      string `yaml:"secret,omitempty"`
+	Editable    string `yaml:"editable,omitempty"`
 	Example     string `yaml:"example,omitempty"`
 }
 
 func (v Var) DefaultString() string {
+	if v.IsSecret() {
+		return ""
+	}
 	return v.Default
+}
+
+func (v *Var) UnmarshalYAML(node *yaml.Node) error {
+	type rawVar Var
+	var decoded rawVar
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+
+	if strings.EqualFold(strings.TrimSpace(decoded.Secret), "true") {
+		decoded.Default = ""
+	}
+
+	*v = Var(decoded)
+	return nil
 }
 
 func (v Var) IsRequired() bool {
@@ -322,6 +342,10 @@ func (v Var) IsRequired() bool {
 
 func (v Var) IsSecret() bool {
 	return strings.EqualFold(strings.TrimSpace(v.Secret), "true")
+}
+
+func (v Var) IsEditable() bool {
+	return strings.EqualFold(strings.TrimSpace(v.Editable), "true")
 }
 
 // MarshalYAML omits import placeholder descriptions and emits defaults as strings.
@@ -335,12 +359,15 @@ func (v Var) MarshalYAML() (interface{}, error) {
 	if description != "" {
 		appendMapping(node, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: description})
 	}
-	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Default})
+	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.DefaultString()})
 	if v.IsRequired() {
 		appendMapping(node, "required", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
 	if v.IsSecret() {
 		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
+	}
+	if v.IsEditable() {
+		appendMapping(node, "editable", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
 	if v.Example != "" {
 		appendMapping(node, "example", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Example})

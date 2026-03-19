@@ -9,20 +9,18 @@ import (
 
 var requiredGitignoreEntries = []string{".env", "compose.yaml"}
 
-func warnMissingGitignoreEntries() {
+func ensureRequiredGitignoreEntries() error {
 	missing, err := missingRequiredGitignoreEntries(".", requiredGitignoreEntries)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not verify .gitignore entries: %v\n", err)
-		return
+		return fmt.Errorf("could not verify .gitignore entries: %w", err)
 	}
 
 	if len(missing) == 0 {
-		return
+		return nil
 	}
 
-	fmt.Fprintf(
-		os.Stderr,
-		"Warning: %s is missing recommended entries: %s\n",
+	return fmt.Errorf(
+		"%s is missing required entries: %s",
 		filepath.Join(".", ".gitignore"),
 		strings.Join(missing, ", "),
 	)

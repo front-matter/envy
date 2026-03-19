@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -65,5 +66,53 @@ func TestMissingRequiredGitignoreEntries_OneMissing(t *testing.T) {
 	expected := []string{"compose.yaml"}
 	if !reflect.DeepEqual(missing, expected) {
 		t.Fatalf("expected %v, got %v", expected, missing)
+	}
+}
+
+func TestEnsureRequiredGitignoreEntries_AllPresent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env\ncompose.yaml\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore): %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd(): %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWd)
+	}()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%s): %v", dir, err)
+	}
+
+	if err := ensureRequiredGitignoreEntries(); err != nil {
+		t.Fatalf("ensureRequiredGitignoreEntries() unexpected error: %v", err)
+	}
+}
+
+func TestEnsureRequiredGitignoreEntries_MissingEntryReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.gitignore): %v", err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd(): %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWd)
+	}()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir(%s): %v", dir, err)
+	}
+
+	err = ensureRequiredGitignoreEntries()
+	if err == nil {
+		t.Fatalf("expected error when .gitignore misses required entry")
+	}
+	if !strings.Contains(err.Error(), ".gitignore is missing required entries: compose.yaml") {
+		t.Fatalf("unexpected error message: %q", err.Error())
 	}
 }

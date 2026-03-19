@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/front-matter/envy/manifest"
+	"gopkg.in/yaml.v3"
 )
 
 func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *testing.T) {
@@ -97,7 +98,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"## Variables",
 		"title=\"APP_ENV\"",
 		"link=\"#app_env\"",
-		"### APP_ENV",
+		`<div id="app_env">`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
@@ -142,5 +143,43 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 
 	if err := os.RemoveAll(contentDir); err != nil {
 		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &manifest.Manifest{
+		Meta: manifest.Meta{
+			Title:      "Example",
+			IgnoreLogs: []string{"warning-goldmark-raw-html"},
+		},
+	}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	ignoreLogs, ok := got["ignoreLogs"].([]interface{})
+	if !ok || len(ignoreLogs) != 1 || ignoreLogs[0] != "warning-goldmark-raw-html" {
+		t.Fatalf("expected ignoreLogs [warning-goldmark-raw-html], got: %#v", got["ignoreLogs"])
+	}
+
+	module, ok := got["module"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected module map in hugo config, got: %#v", got["module"])
+	}
+	imports, ok := module["imports"].([]interface{})
+	if !ok || len(imports) == 0 {
+		t.Fatalf("expected non-empty module.imports, got: %#v", module["imports"])
 	}
 }

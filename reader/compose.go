@@ -15,14 +15,9 @@ import (
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
 	"github.com/front-matter/envy/manifest"
-	"github.com/getsops/sops/v3/decrypt"
-	"gopkg.in/yaml.v3"
 )
 
 var interpolationPattern = regexp.MustCompile(`^\$\{([^}:]+)(?:(:?[-?])(.*))?\}$`)
-var decryptComposeFile = func(path string) ([]byte, error) {
-	return decrypt.File(path, "yaml")
-}
 
 // ImportCompose reads a compose file and converts it to an envy manifest.
 func ImportCompose(path string) (*manifest.Manifest, error) {
@@ -31,9 +26,9 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("resolving compose file path %s: %w", path, err)
 	}
 
-	composeContent, err := loadComposeContent(absPath)
+	composeContent, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading compose file %s: %w", path, err)
 	}
 
 	configDetails := types.ConfigDetails{
@@ -215,6 +210,7 @@ func sameManifestVar(left, right manifest.Var) bool {
 		left.Default == right.Default &&
 		left.Required == right.Required &&
 		left.Secret == right.Secret &&
+		left.Editable == right.Editable &&
 		left.Example == right.Example
 }
 
@@ -229,34 +225,6 @@ func dedupePreserveOrder(values []string) []string {
 		result = append(result, value)
 	}
 	return result
-}
-
-func loadComposeContent(path string) ([]byte, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading compose file %s: %w", path, err)
-	}
-
-	if !hasSOPSMetadata(content) {
-		return content, nil
-	}
-
-	decrypted, err := decryptComposeFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("decrypting compose file %s with sops: %w", path, err)
-	}
-
-	return decrypted, nil
-}
-
-func hasSOPSMetadata(content []byte) bool {
-	var document map[string]interface{}
-	if err := yaml.Unmarshal(content, &document); err != nil {
-		return false
-	}
-
-	_, ok := document["sops"]
-	return ok
 }
 
 // extractComposeHeaderComments reads comment lines at the top of a compose file
@@ -336,14 +304,19 @@ func composeEnvToVars(env types.MappingWithEquals) []manifest.Var {
 			// KEY form: value comes from host env at runtime, no default.
 			rawValue = "${" + key + "}"
 		}
-		defaultValue, _, required := parseComposeEnvValue(key, rawValue)
+		defaultValue, editable, required := parseComposeEnvValue(key, rawValue)
+		isSecret := isSecretVar(key)
+		if isSecret {
+			defaultValue = ""
+		}
 
 		vars = append(vars, manifest.Var{
 			Key:         key,
 			Default:     defaultValue,
 			Description: "Imported from compose environment",
 			Required:    strconv.FormatBool(required),
-			Secret:      strconv.FormatBool(isSecretVar(key)),
+			Secret:      strconv.FormatBool(isSecret),
+			Editable:    strconv.FormatBool(editable),
 		})
 	}
 

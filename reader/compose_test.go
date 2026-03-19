@@ -3,6 +3,7 @@ package reader
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/front-matter/envy/manifest"
@@ -153,6 +154,37 @@ func TestImportComposeNoHeaderComments(t *testing.T) {
 	}
 }
 
+func TestImportComposeWithTopLevelSOPSBlock(t *testing.T) {
+	tmp := t.TempDir()
+	composePath := filepath.Join(tmp, "compose.yaml")
+
+	compose := `sops:
+  encrypted_regex: '^(data|stringData)$'
+services:
+  web:
+    image: ghcr.io/example/web:latest
+    environment:
+      APP_ENV: production
+`
+
+	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+		t.Fatalf("write compose file: %v", err)
+	}
+
+	_, err := ImportCompose(composePath)
+	if err == nil {
+		t.Fatalf("expected schema validation error for top-level sops block")
+	}
+
+	message := err.Error()
+	if !strings.Contains(message, "additional properties 'sops' not allowed") {
+		t.Fatalf("expected compose schema error for sops block, got %q", message)
+	}
+	if strings.Contains(strings.ToLower(message), "decrypt") {
+		t.Fatalf("did not expect decryption path in error, got %q", message)
+	}
+}
+
 func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
@@ -198,12 +230,18 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 	if !secretVar.IsSecret() {
 		t.Errorf("DATABASE_PASSWORD should be marked as secret")
 	}
+	if secretVar.Default != "" {
+		t.Errorf("DATABASE_PASSWORD default should be empty for secret var, got %q", secretVar.Default)
+	}
 
 	if apiSecretVar == nil {
 		t.Fatal("expected API_SECRET_KEY variable")
 	}
 	if !apiSecretVar.IsSecret() {
 		t.Errorf("API_SECRET_KEY should be marked as secret")
+	}
+	if apiSecretVar.Default != "" {
+		t.Errorf("API_SECRET_KEY default should be empty for secret var, got %q", apiSecretVar.Default)
 	}
 
 	if normalVar == nil {

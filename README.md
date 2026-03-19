@@ -77,7 +77,6 @@ envy import
 # Or import a specific file/directory via positional arg
 envy import .env
 envy import compose.yaml
-envy import compose.sops.yaml
 envy import ./config
 
 # --file accepts a folder and writes ./generated/env.yaml
@@ -121,8 +120,6 @@ envy server --bind 0.0.0.0
 
 # Deploy documentation site to GitHub Pages
 envy deploy --target production
-
-If the imported compose file contains a top-level `sops` block, `envy import` automatically decrypts it before parsing.
 
 ## env.yaml format
 
@@ -180,6 +177,7 @@ when set.
 | `default` | Default value for generated `.env` |
 | `required` | Fail validation if missing |
 | `secret` | Omit from `.env.example`, flag in git audit |
+| `editable` | Export variable to generated `.env` only when `"true"` |
 | `example` | Example value shown in comments |
 
 ## Installation
@@ -233,25 +231,6 @@ envy completion fish > ~/.config/fish/completions/envy.fish
 
 ```powershell
 envy completion powershell | Out-String | Invoke-Expression
-```
-
-## Integration with SOPS
-
-Secrets stay encrypted in git via [SOPS](https://github.com/getsops/sops):
-
-```bash
-# Audit: list what needs to be in SOPS
-envy secrets
-
-# Import an encrypted compose file directly
-envy import compose.sops.yaml
-
-# Check nothing leaked into git
-envy secrets --check
-
-# Decrypt and validate at deploy time
-sops -d secrets.enc.yaml >> .env.prod
-envy validate .env.prod
 ```
 
 ## Meta

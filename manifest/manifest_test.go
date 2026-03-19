@@ -117,7 +117,7 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 		Groups: map[string]Group{
 			"env": {
 				Vars: []Var{
-					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true"},
+					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true", Editable: "true"},
 					{Key: "BOOL_TRUE", Default: "true"},
 					{Key: "BOOL_FALSE", Default: "false"},
 				},
@@ -137,8 +137,8 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	if !strings.Contains(output, "default: \"false\"") {
 		t.Fatalf("expected quoted string default false, got:\n%s", output)
 	}
-	if !strings.Contains(output, "default: \"production\"") {
-		t.Fatalf("expected quoted string default production, got:\n%s", output)
+	if !strings.Contains(output, "default: \"\"") {
+		t.Fatalf("expected quoted empty default for secret var, got:\n%s", output)
 	}
 	if !strings.Contains(output, "example: \"demo-value\"") {
 		t.Fatalf("expected quoted string example value, got:\n%s", output)
@@ -148,6 +148,9 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	}
 	if !strings.Contains(output, "secret: \"true\"") {
 		t.Fatalf("expected quoted string secret true, got:\n%s", output)
+	}
+	if !strings.Contains(output, "editable: \"true\"") {
+		t.Fatalf("expected quoted string editable true, got:\n%s", output)
 	}
 	if strings.Contains(output, "default: true\n") {
 		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)
@@ -160,6 +163,9 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	}
 	if strings.Contains(output, "secret: true\n") {
 		t.Fatalf("did not expect YAML boolean secret true, got:\n%s", output)
+	}
+	if strings.Contains(output, "editable: true\n") {
+		t.Fatalf("did not expect YAML boolean editable true, got:\n%s", output)
 	}
 	if !strings.Contains(output, "BOOL_TRUE:") {
 		t.Fatalf("expected group vars to be written as mapping style, got:\n%s", output)
@@ -279,6 +285,41 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	}
 	if group.Vars[0].Default != "production" {
 		t.Fatalf("expected default production, got %q", group.Vars[0].Default)
+	}
+}
+
+func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
+	input := strings.Join([]string{
+		"meta:",
+		"  title: Example",
+		"  version: v1",
+		"groups:",
+		"  app:",
+		"    vars:",
+		"      SECRET_KEY:",
+		"        default: super-secret",
+		"        secret: true",
+	}, "\n")
+
+	var m Manifest
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	group, ok := m.Groups["app"]
+	if !ok || len(group.Vars) != 1 {
+		t.Fatalf("expected app group with one var, got %#v", m.Groups)
+	}
+
+	secret := group.Vars[0]
+	if !secret.IsSecret() {
+		t.Fatalf("expected var to be secret")
+	}
+	if secret.Default != "" {
+		t.Fatalf("expected secret default to be empty, got %q", secret.Default)
+	}
+	if secret.DefaultString() != "" {
+		t.Fatalf("expected secret DefaultString to be empty, got %q", secret.DefaultString())
 	}
 }
 

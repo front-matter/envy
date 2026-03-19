@@ -23,13 +23,12 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 	vars := make([]manifest.Var, 0, len(env.Keys))
 
 	for _, key := range env.Keys {
-		value := env.Values[key]
-
 		vars = append(vars, manifest.Var{
 			Key:         key,
-			Default:     value,
+			Default:     "",
 			Description: "Imported from .env file",
 			Secret:      "true",
+			Editable:    "true",
 		})
 	}
 

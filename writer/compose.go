@@ -226,6 +226,9 @@ func composeEnvironmentNodeByGroup(groups []manifest.GroupVars, flavor string) *
 
 func composeEnvValue(v manifest.Var, flavor string) string {
 	defaultVal := v.DefaultString()
+	if !v.IsEditable() {
+		return defaultVal
+	}
 
 	if flavor == "coolify" && v.IsRequired() {
 		return fmt.Sprintf("${%s:?%s}", v.Key, defaultVal)

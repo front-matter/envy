@@ -49,8 +49,8 @@ APP_NAME=TestApp
 	}
 
 	for _, v := range group.Vars {
-		if v.Key == "APP_NAME" && v.Default != "TestApp" {
-			t.Errorf("expected APP_NAME default to be preserved, got %s", v.Default)
+		if v.Key == "APP_NAME" && v.Default != "" {
+			t.Errorf("expected APP_NAME default to be empty for secret var, got %s", v.Default)
 		}
 	}
 }

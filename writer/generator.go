@@ -29,9 +29,13 @@ func Generate(m *manifest.Manifest, opts Options) string {
 		sb.WriteString(fmt.Sprintf("# %s\n", group.Description))
 
 		for _, v := range group.Vars {
+			if !v.IsEditable() {
+				continue
+			}
+
 			if v.IsSecret() && !opts.IncludeSecrets {
 				sb.WriteString(fmt.Sprintf(
-					"# %s=  # SECRET — inject via SOPS or environment\n", v.Key,
+					"# %s=  # SECRET — inject via secret manager or environment\n", v.Key,
 				))
 				continue
 			}

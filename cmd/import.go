@@ -38,7 +38,6 @@ Examples:
   envy import
 	  envy import .env
 	  envy import compose.yaml
-	  envy import compose.sops.yaml
 	  envy import ./config
 	  envy import compose.yaml --file ./generated
 	  envy import --file config/

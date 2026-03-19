@@ -10,8 +10,9 @@ import (
 var manifestPath string
 
 var rootCmd = &cobra.Command{
-	Use:   "envy",
-	Short: "Environment variable manager",
+	Use:           "envy",
+	Short:         "Environment variable manager",
+	SilenceErrors: true,
 	Long: `envy manages environment variables via a structured env.yaml 
 manifest. It generates .env files, validates configuration,
 produces documentation, and audits secrets.
@@ -28,15 +29,15 @@ produces documentation, and audits secrets.
 	envy secrets --check
 	envy server --bind 0.0.0.0
 	envy deploy --target production`,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		warnMissingGitignoreEntries()
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return ensureRequiredGitignoreEntries()
 	},
 }
 
 // Execute is the entry point called by main.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
