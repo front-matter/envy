@@ -38,10 +38,25 @@ produces documentation, and audits secrets.
 
 // Execute is the entry point called by main.
 func Execute() {
+	if hasVersionArg(os.Args[1:]) {
+		fmt.Printf("envy version %s\n", Version)
+		return
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func hasVersionArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "--version" || arg == "-v" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func init() {

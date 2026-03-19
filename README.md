@@ -137,6 +137,8 @@ meta:
   version: "v13.0.8.1"
   docs: https://inveniordm.docs.cern.ch/reference/configuration/
   languageCode: en-US
+  ignoreLogs:
+    - warning-goldmark-raw-html
 
 services:
   web:

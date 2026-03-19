@@ -139,12 +139,12 @@ func hasConfigFlag(args []string) bool {
 func resolveBuildManifestPath() (string, error) {
 	path, err := resolveManifest(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("envy build requires env.yaml: %w\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
+		return "", fmt.Errorf("envy build requires env.yaml: %w\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
 	}
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("envy build requires env.yaml at %s\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
+			return "", fmt.Errorf("envy build requires env.yaml at %s\n\nSuggested fields in env.yaml for Hugo:\n\nmeta:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
 		}
 		return "", fmt.Errorf("checking env.yaml at %s: %w", path, err)
 	}
