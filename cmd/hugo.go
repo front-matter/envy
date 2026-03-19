@@ -18,8 +18,8 @@ import (
 
 var buildCmd = &cobra.Command{
 	Use:                "build [hugo flags]",
-	Short:              "Forward to hugo build",
-	Long:               "Run hugo build with env.yaml as configuration source (instead of hugo.yaml).",
+	Short:              "Generate documentation site",
+	Long:               "Generate documentation site for env.yaml file using Hugo.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("build", args)
@@ -28,8 +28,8 @@ var buildCmd = &cobra.Command{
 
 var serverCmd = &cobra.Command{
 	Use:                "server [hugo flags]",
-	Short:              "Forward to hugo server",
-	Long:               "Run hugo server with the same flags and arguments as Hugo.",
+	Short:              "Run local documentation site",
+	Long:               "Run local documentation site generated from env.yaml",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("server", args)
@@ -38,8 +38,8 @@ var serverCmd = &cobra.Command{
 
 var deployCmd = &cobra.Command{
 	Use:                "deploy [hugo flags]",
-	Short:              "Forward to hugo deploy",
-	Long:               "Run hugo deploy with the same flags and arguments as Hugo.",
+	Short:              "Deploy documentation site",
+	Long:               "Deploy documentation site generated from env.yaml",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("deploy", args)
