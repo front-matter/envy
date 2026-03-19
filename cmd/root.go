@@ -28,6 +28,9 @@ produces documentation, and audits secrets.
 	envy secrets --check
 	envy server --bind 0.0.0.0
 	envy deploy --target production`,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		warnMissingGitignoreEntries()
+	},
 }
 
 // Execute is the entry point called by main.
