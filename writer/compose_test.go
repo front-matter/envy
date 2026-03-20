@@ -22,7 +22,7 @@ func TestGenerateComposeIncludesCommentsAndLists(t *testing.T) {
 				Description: "Background worker",
 				Entrypoint:  []string{"/entrypoint.sh"},
 				Command:     []string{"celery", "worker"},
-				Sets:      []string{"application"},
+				Sets:        []string{"application"},
 			},
 		},
 		Sets: map[string]manifest.Set{
@@ -61,39 +61,39 @@ func TestComposeEnvValue(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "default editable fallback",
+			name:   "default not readonly fallback",
 			flavor: "default",
-			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Editable: "true"},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production"},
 			want:   "${APP_ENV:-production}",
 		},
 		{
-			name:   "coolify required editable uses question fallback",
+			name:   "coolify required not readonly uses question fallback",
 			flavor: "coolify",
-			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "true", Editable: "true"},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "true"},
 			want:   "${APP_ENV:?production}",
 		},
 		{
-			name:   "coolify optional editable keeps dash fallback",
+			name:   "coolify optional not readonly keeps dash fallback",
 			flavor: "coolify",
-			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "false", Editable: "true"},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "false"},
 			want:   "${APP_ENV:-production}",
 		},
 		{
-			name:   "default non-editable hardcodes value",
+			name:   "default readonly hardcodes value",
 			flavor: "default",
-			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Editable: "false"},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Readonly: "true"},
 			want:   "production",
 		},
 		{
-			name:   "coolify required non-editable hardcodes value",
+			name:   "coolify required readonly hardcodes value",
 			flavor: "coolify",
-			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "true", Editable: "false"},
+			varDef: manifest.Var{Key: "APP_ENV", Default: "production", Required: "true", Readonly: "true"},
 			want:   "production",
 		},
 		{
-			name:   "json with variable reference editable",
+			name:   "json with variable reference not readonly",
 			flavor: "default",
-			varDef: manifest.Var{Key: "APP_JSON", Default: `{"name":"demo"}`, Editable: "true"},
+			varDef: manifest.Var{Key: "APP_JSON", Default: `{"name":"demo"}`},
 			want:   `${APP_JSON:-{"name":"demo"}}`,
 		},
 	}
@@ -111,9 +111,9 @@ func TestComposeEnvValue(t *testing.T) {
 func TestGenerateComposeIncludesCoolifyLabel(t *testing.T) {
 	m := &manifest.Manifest{
 		Services: []manifest.Service{{
-			Name:   "worker",
-			Image:  "ghcr.io/example/worker:latest",
-			Sets: []string{"application"},
+			Name:  "worker",
+			Image: "ghcr.io/example/worker:latest",
+			Sets:  []string{"application"},
 		}},
 		Sets: map[string]manifest.Set{
 			"application": {},
@@ -177,9 +177,9 @@ func TestGenerateComposeExcludesSelectedService(t *testing.T) {
 func TestGenerateComposeOmitsSecretVars(t *testing.T) {
 	m := &manifest.Manifest{
 		Services: []manifest.Service{{
-			Name:   "web",
-			Image:  "ghcr.io/example/web:latest",
-			Sets: []string{"application"},
+			Name:  "web",
+			Image: "ghcr.io/example/web:latest",
+			Sets:  []string{"application"},
 		}},
 		Sets: map[string]manifest.Set{
 			"application": {
@@ -208,43 +208,43 @@ func TestGenerateComposeOmitsSecretVars(t *testing.T) {
 	}
 }
 
-func TestGenerateComposeEditableAndRequiredOutput(t *testing.T) {
+func TestGenerateComposeReadonlyAndRequiredOutput(t *testing.T) {
 	m := &manifest.Manifest{
 		Services: []manifest.Service{{
-			Name:   "web",
-			Image:  "ghcr.io/example/web:latest",
-			Sets: []string{"application"},
+			Name:  "web",
+			Image: "ghcr.io/example/web:latest",
+			Sets:  []string{"application"},
 		}},
 		Sets: map[string]manifest.Set{
 			"application": {
 				Vars: []manifest.Var{
-					{Key: "EDITABLE_OPT", Default: "opt", Editable: "true", Required: "false"},
-					{Key: "EDITABLE_REQ", Default: "req", Editable: "true", Required: "true"},
-					{Key: "LOCKED_REQ", Default: "locked", Editable: "false", Required: "true"},
+					{Key: "READONLY_OPT", Default: "opt", Readonly: "true", Required: "false"},
+					{Key: "READONLY_REQ", Default: "locked", Readonly: "true", Required: "true"},
+					{Key: "EDITABLE_OPT", Default: "opt", Required: "false"},
 				},
 			},
 		},
 	}
 
 	defaultCompose := GenerateCompose(m, ComposeOptions{Flavor: "default"})
+	if !strings.Contains(defaultCompose, "READONLY_OPT: \"opt\"") {
+		t.Fatalf("default flavor should hardcode readonly optional var\n%s", defaultCompose)
+	}
 	if !strings.Contains(defaultCompose, "EDITABLE_OPT: \"${EDITABLE_OPT:-opt}\"") {
-		t.Fatalf("default flavor missing editable optional fallback\n%s", defaultCompose)
+		t.Fatalf("default flavor missing optional fallback for non-readonly var\n%s", defaultCompose)
 	}
-	if !strings.Contains(defaultCompose, "EDITABLE_REQ: \"${EDITABLE_REQ:-req}\"") {
-		t.Fatalf("default flavor missing editable required fallback\n%s", defaultCompose)
-	}
-	if !strings.Contains(defaultCompose, "LOCKED_REQ: \"locked\"") {
-		t.Fatalf("default flavor should hardcode non-editable var\n%s", defaultCompose)
+	if !strings.Contains(defaultCompose, "READONLY_REQ: \"locked\"") {
+		t.Fatalf("default flavor should hardcode readonly required var\n%s", defaultCompose)
 	}
 
 	coolifyCompose := GenerateCompose(m, ComposeOptions{Flavor: "coolify"})
+	if !strings.Contains(coolifyCompose, "READONLY_OPT: \"opt\"") {
+		t.Fatalf("coolify flavor should hardcode readonly optional var\n%s", coolifyCompose)
+	}
 	if !strings.Contains(coolifyCompose, "EDITABLE_OPT: \"${EDITABLE_OPT:-opt}\"") {
-		t.Fatalf("coolify flavor missing editable optional fallback\n%s", coolifyCompose)
+		t.Fatalf("coolify flavor missing optional fallback for non-readonly var\n%s", coolifyCompose)
 	}
-	if !strings.Contains(coolifyCompose, "EDITABLE_REQ: \"${EDITABLE_REQ:?req}\"") {
-		t.Fatalf("coolify flavor should use :? for editable required vars\n%s", coolifyCompose)
-	}
-	if !strings.Contains(coolifyCompose, "LOCKED_REQ: \"locked\"") {
-		t.Fatalf("coolify flavor should hardcode non-editable var\n%s", coolifyCompose)
+	if !strings.Contains(coolifyCompose, "READONLY_REQ: \"locked\"") {
+		t.Fatalf("coolify flavor should hardcode readonly required var\n%s", coolifyCompose)
 	}
 }

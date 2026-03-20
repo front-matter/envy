@@ -29,7 +29,7 @@ func Generate(m *manifest.Manifest, opts Options) string {
 		sb.WriteString(fmt.Sprintf("# %s\n", set.Description))
 
 		for _, v := range set.Vars {
-			if !v.IsEditable() {
+			if v.IsReadonly() {
 				continue
 			}
 

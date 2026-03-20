@@ -117,7 +117,7 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 		Sets: map[string]Set{
 			"env": {
 				Vars: []Var{
-					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true", Editable: "true"},
+					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true"},
 					{Key: "BOOL_TRUE", Default: "true"},
 					{Key: "BOOL_FALSE", Default: "false"},
 				},
@@ -148,9 +148,6 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	}
 	if !strings.Contains(output, "secret: \"true\"") {
 		t.Fatalf("expected quoted string secret true, got:\n%s", output)
-	}
-	if !strings.Contains(output, "editable: \"true\"") {
-		t.Fatalf("expected quoted string editable true, got:\n%s", output)
 	}
 	if strings.Contains(output, "default: true\n") {
 		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)

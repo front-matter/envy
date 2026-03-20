@@ -184,7 +184,7 @@ when set.
 | `default` | Default value for generated `.env` |
 | `required` | Fail validation if missing |
 | `secret` | Omit from `.env.example`, flag in git audit |
-| `editable` | Export variable to generated `.env` only when `"true"` |
+| `readonly` | Prevent variable from being exported to generated `.env` when `"true"` (default: `"false"`) |
 | `example` | Example value shown in comments |
 
 ## Installation

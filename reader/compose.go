@@ -211,7 +211,7 @@ func sameManifestVar(left, right manifest.Var) bool {
 		left.Default == right.Default &&
 		left.Required == right.Required &&
 		left.Secret == right.Secret &&
-		left.Editable == right.Editable &&
+		left.Readonly == right.Readonly &&
 		left.Example == right.Example
 }
 
@@ -317,7 +317,7 @@ func composeEnvToVars(env types.MappingWithEquals) []manifest.Var {
 			Description: "Imported from compose environment",
 			Required:    strconv.FormatBool(required),
 			Secret:      strconv.FormatBool(isSecret),
-			Editable:    strconv.FormatBool(editable),
+			Readonly:    strconv.FormatBool(!editable),
 		})
 	}
 

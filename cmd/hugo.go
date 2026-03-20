@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"os"
@@ -299,12 +300,6 @@ func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, erro
 		return "", err
 	}
 
-	customDocsIndex := filepath.Join(siteRoot, "docs", "index.md")
-	if err := copyFileIfExists(customDocsIndex, filepath.Join(tmpDir, "_index.md")); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", err
-	}
-
 	readmeHome := filepath.Join(siteRoot, "README.md")
 	if err := copyFileIfMissing(readmeHome, filepath.Join(tmpDir, "_index.md")); err != nil {
 		os.RemoveAll(tmpDir)
@@ -498,6 +493,9 @@ func generateSetsIndexMarkdown(m *manifest.Manifest) string {
 		"title":       "Sets",
 		"description": "Auto-generated configuration set reference from env.yaml.",
 		"weight":      10,
+		"sidebar": map[string]interface{}{
+			"hide": true,
+		},
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
 				"name":   "Sets",
@@ -505,11 +503,10 @@ func generateSetsIndexMarkdown(m *manifest.Manifest) string {
 			},
 		},
 	}))
-	body.WriteString("This section is generated from env.yaml during `envy build`.\n\n")
-	body.WriteString(renderCardsOpen(3))
+	body.WriteString(renderCardsOpen(2))
 	for _, set := range m.OrderedSets() {
-		description := strings.TrimSpace(defaultString(set.Description, "Set configuration"))
-		body.WriteString(renderCard(set.Key, "/sets/"+sanitizeSetPageName(set.Key)+"/", setIcon(set.Key), description))
+		services := servicesForSet(m, set.Key)
+		body.WriteString(renderSetOverviewCard(set, services))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
@@ -521,6 +518,9 @@ func generateServicesIndexMarkdown(m *manifest.Manifest) string {
 		"title":       "Services",
 		"description": "Auto-generated service reference from env.yaml.",
 		"weight":      5,
+		"sidebar": map[string]interface{}{
+			"hide": true,
+		},
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
 				"name":   "Services",
@@ -528,11 +528,9 @@ func generateServicesIndexMarkdown(m *manifest.Manifest) string {
 			},
 		},
 	}))
-	body.WriteString("This section is generated from env.yaml during `envy build`.\n\n")
-	body.WriteString(renderCardsOpen(3))
+	body.WriteString(renderCardsOpen(2))
 	for _, service := range m.Services {
-		description := strings.TrimSpace(defaultString(service.Description, service.Name+" service"))
-		body.WriteString(renderCard(service.Name, "#"+service.Name, "serverless", description))
+		body.WriteString(renderServiceCard(m, service))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
@@ -544,25 +542,17 @@ func generateSetMarkdown(m *manifest.Manifest, set manifest.Set) string {
 		"title":       set.Key,
 		"description": strings.TrimSpace(set.Description),
 		"weight":      setWeight(m, set.Key),
+		"hideTitle":   true,
+		"toc":         false,
 	}))
-	if strings.TrimSpace(set.Description) != "" {
-		body.WriteString(strings.TrimSpace(set.Description) + "\n\n")
-	}
 
+	// Add set card at the top
 	services := servicesForSet(m, set.Key)
-	if len(services) > 0 {
-		body.WriteString("## Services\n\n")
-		for _, service := range services {
-			body.WriteString(fmt.Sprintf("- %s\n", service))
-		}
-		body.WriteString("\n")
-	}
+	body.WriteString(renderCardsOpen(1))
+	body.WriteString(renderSetCard(set, services))
+	body.WriteString(renderCardsClose())
+	body.WriteString("\n")
 
-	if strings.TrimSpace(set.Link) != "" {
-		body.WriteString(fmt.Sprintf("## Documentation\n\n![Documentation](/images/readme.svg) [%s](%s)\n\n", set.Link, set.Link))
-	}
-
-	body.WriteString("## Variables\n\n")
 	if len(set.Vars) == 0 {
 		body.WriteString("This set does not define variables.\n")
 		return body.String()
@@ -570,13 +560,140 @@ func generateSetMarkdown(m *manifest.Manifest, set manifest.Set) string {
 	for _, variable := range set.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		tag, tagColor := variableCardTag(variable)
-		body.WriteString(renderCardWithTag(variable.Key, "#"+variableHeadingAnchor(variable.Key), "env", variableCardSubtitle(variable), tag, tagColor))
+		tag, tagColor, tagBorder := variableCardTag(variable)
+		varClass := variableCardClass(variable)
+		body.WriteString(renderCardWithTag(variable.Key, "", "env", variableCardSubtitle(variable), variableCardHTML(variable), "hx:py-4 hx:px-4", tag, tagColor, tagBorder, varClass))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
 
 	return body.String()
+}
+
+func renderServiceCard(m *manifest.Manifest, service manifest.Service) string {
+	var sb strings.Builder
+	titleClass := ""
+	if len(service.Sets) > 0 {
+		titleClass = "hx:pr-32 md:hx:pr-40"
+	}
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"#%s\" icon=\"%s\"",
+		escapeShortcodeValue(service.Name),
+		escapeShortcodeValue(service.Name),
+		"serverless",
+	))
+
+	if description := strings.TrimSpace(service.Description); description != "" {
+		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+	}
+
+	if strings.TrimSpace(service.Image) != "" {
+		imageValue := strings.TrimSpace(service.Image)
+		imageLink := imageLink(imageValue)
+		if imageLink != "" {
+			sb.WriteString(fmt.Sprintf(" subtitle2=`**Image:** [%s](%s)`", escapeShortcodeRawValue(imageValue), escapeShortcodeRawValue(imageLink)))
+		} else {
+			sb.WriteString(fmt.Sprintf(" subtitle2=`**Image:** %s`", escapeShortcodeRawValue(imageValue)))
+		}
+	}
+
+	if platform := strings.TrimSpace(service.Platform); platform != "" {
+		sb.WriteString(fmt.Sprintf(" subtitle3=`**Platform:** %s`", escapeShortcodeRawValue(platform)))
+	}
+
+	if len(service.Command) > 0 {
+		indentedCommand := "**Command:**\n\n    " + wrapCommandArgs(service.Command, 60, "    ")
+		sb.WriteString(fmt.Sprintf(" subtitle4=`%s`", escapeShortcodeRawValue(indentedCommand)))
+	}
+
+	if len(service.Sets) > 0 {
+		setTags := make([]string, len(service.Sets))
+		setTagLinks := make([]string, len(service.Sets))
+		for i, setKey := range service.Sets {
+			setTags[i] = setKey
+			setTagLinks[i] = "/sets/" + sanitizeSetPageName(setKey) + "/"
+		}
+		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="blue" tagBorder="false"`,
+			escapeShortcodeValue(strings.Join(setTags, ",")),
+			escapeShortcodeValue(strings.Join(setTagLinks, ",")),
+		))
+	}
+
+	if titleClass != "" {
+		sb.WriteString(fmt.Sprintf(" titleClass=\"%s\"", escapeShortcodeValue(titleClass)))
+	}
+
+	sb.WriteString(" >}}\n")
+	return sb.String()
+}
+
+// imageLink generates a public registry URL for the given image reference.
+// Supports Docker Hub (no registry or docker.io) and ghcr.io.
+func imageLink(image string) string {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return ""
+	}
+
+	// Remove tag/digest (e.g., postgres:17.4 -> postgres)
+	imageName := strings.Split(image, ":")[0]
+	imageName = strings.Split(imageName, "@")[0]
+
+	parts := strings.Split(imageName, "/")
+	registry := ""
+	if len(parts) > 1 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":")) {
+		registry = parts[0]
+		parts = parts[1:]
+		imageName = strings.Join(parts, "/")
+	}
+
+	switch registry {
+	case "", "docker.io":
+		// Docker Hub
+		if len(parts) == 1 {
+			// Official image: postgres -> https://hub.docker.com/_/postgres
+			return fmt.Sprintf("https://hub.docker.com/_%s", "/"+imageName)
+		} else if len(parts) == 2 {
+			// User image: username/imagename -> https://hub.docker.com/r/username/imagename
+			return fmt.Sprintf("https://hub.docker.com/r/%s", imageName)
+		}
+	case "ghcr.io":
+		return fmt.Sprintf("https://ghcr.io/%s", imageName)
+	}
+	return ""
+}
+
+// wrapCommandArgs joins args into a shell command string, wrapping at maxWidth
+// characters using backslash line continuation with the given continuation indent.
+func wrapCommandArgs(args []string, maxWidth int, indent string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	joined := strings.Join(args, " ")
+	if len(joined) <= maxWidth {
+		return joined
+	}
+	// Build wrapped output: first arg starts the line, subsequent args are added
+	// until the line would exceed maxWidth, then a continuation is inserted.
+	var sb strings.Builder
+	lineLen := 0
+	for i, arg := range args {
+		if i == 0 {
+			sb.WriteString(arg)
+			lineLen = len(arg)
+		} else {
+			if lineLen+1+len(arg) > maxWidth {
+				sb.WriteString(" \\\n")
+				sb.WriteString(indent)
+				sb.WriteString(arg)
+				lineLen = len(indent) + len(arg)
+			} else {
+				sb.WriteString(" ")
+				sb.WriteString(arg)
+				lineLen += 1 + len(arg)
+			}
+		}
+	}
+	return sb.String()
 }
 
 func frontMatterMarkdown(values map[string]interface{}) string {
@@ -617,10 +734,10 @@ func renderCardsClose() string {
 }
 
 func renderCard(title, link, icon, description string) string {
-	return renderCardWithTag(title, link, icon, description, "", "")
+	return renderCardWithTag(title, link, icon, description, "", "", "", "", "", "")
 }
 
-func renderCardWithTag(title, link, icon, description, tag, tagColor string) string {
+func renderCardWithTag(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card link=\"%s\" title=\"%s\" icon=\"%s\"",
 		escapeShortcodeValue(link),
@@ -630,11 +747,23 @@ func renderCardWithTag(title, link, icon, description, tag, tagColor string) str
 	if strings.TrimSpace(description) != "" {
 		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
 	}
+	if strings.TrimSpace(htmlContent) != "" {
+		sb.WriteString(fmt.Sprintf(" html=`%s`", escapeShortcodeRawValue(htmlContent)))
+	}
+	if strings.TrimSpace(titlePadding) != "" {
+		sb.WriteString(fmt.Sprintf(" titlePadding=\"%s\"", escapeShortcodeValue(titlePadding)))
+	}
 	if tag != "" {
 		sb.WriteString(fmt.Sprintf(" tag=\"%s\"", escapeShortcodeValue(tag)))
 		if tagColor != "" {
 			sb.WriteString(fmt.Sprintf(" tagColor=\"%s\"", escapeShortcodeValue(tagColor)))
 		}
+		if tagBorder != "" {
+			sb.WriteString(fmt.Sprintf(" tagBorder=\"%s\"", escapeShortcodeValue(tagBorder)))
+		}
+	}
+	if class != "" {
+		sb.WriteString(fmt.Sprintf(" class=\"%s\"", escapeShortcodeValue(class)))
 	}
 	sb.WriteString(" >}}\n")
 	return sb.String()
@@ -648,15 +777,160 @@ func escapeShortcodeRawValue(value string) string {
 	return strings.ReplaceAll(value, "`", "'")
 }
 
+func renderSetCard(set manifest.Set, services []string) string {
+	var sb strings.Builder
+	titleClass := "hx:text-4xl md:hx:text-5xl hx:tracking-tight"
+	if len(services) > 0 {
+		titleClass += " hx:pr-40 md:hx:pr-56"
+	}
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\" titleClass=\"%s\"",
+		escapeShortcodeValue(set.Key),
+		escapeShortcodeValue("/images/properties.svg"),
+		escapeShortcodeValue("hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0"),
+		escapeShortcodeValue(titleClass),
+	))
+
+	// Add description as subtitle
+	if strings.TrimSpace(set.Description) != "" {
+		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description))))
+	}
+
+	// Add documentation link as subtitle2
+	if strings.TrimSpace(set.Link) != "" {
+		link := strings.TrimSpace(set.Link)
+		sb.WriteString(fmt.Sprintf(" subtitle2=`[%s](%s)`", escapeShortcodeRawValue(link), escapeShortcodeRawValue(link)))
+	}
+
+	// Add services tags in the card tag area
+	if len(services) > 0 {
+		serviceTags := make([]string, len(services))
+		serviceTagLinks := make([]string, len(services))
+		for i, service := range services {
+			serviceTags[i] = service
+			serviceTagLinks[i] = "/services/#" + service
+		}
+		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="red" tagBorder="false"`,
+			escapeShortcodeValue(strings.Join(serviceTags, ",")),
+			escapeShortcodeValue(strings.Join(serviceTagLinks, ",")),
+		))
+	}
+
+	sb.WriteString(" >}}\n")
+	return sb.String()
+}
+
+func renderSetOverviewCard(set manifest.Set, services []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\"",
+		escapeShortcodeValue(set.Key),
+		escapeShortcodeValue("/sets/"+sanitizeSetPageName(set.Key)+"/"),
+		escapeShortcodeValue("/images/properties.svg"),
+		escapeShortcodeValue("hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0"),
+	))
+
+	description := strings.TrimSpace(defaultString(set.Description, "Set configuration"))
+	if description != "" {
+		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+	}
+
+	if strings.TrimSpace(set.Link) != "" {
+		link := strings.TrimSpace(set.Link)
+		sb.WriteString(fmt.Sprintf(" subtitle2=`[%s](%s)`", escapeShortcodeRawValue(link), escapeShortcodeRawValue(link)))
+	}
+
+	if len(services) > 0 {
+		serviceTags := make([]string, len(services))
+		serviceTagLinks := make([]string, len(services))
+		for i, service := range services {
+			serviceTags[i] = service
+			serviceTagLinks[i] = "/services/#" + service
+		}
+		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="red" tagBorder="false"`,
+			escapeShortcodeValue(strings.Join(serviceTags, ",")),
+			escapeShortcodeValue(strings.Join(serviceTagLinks, ",")),
+		))
+	}
+
+	sb.WriteString(" >}}\n")
+	return sb.String()
+}
+
+func renderLinkedHextraBadgeHTML(label, href, color string, border bool) string {
+	badgeClass := hextraBadgeColorClass(color)
+	borderClass := ""
+	if border {
+		borderClass = "hx:border "
+	}
+
+	return fmt.Sprintf(
+		"<a href=\"%s\" title=\"%s\" class=\"not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline\"><div class=\"hextra-badge\"><div class=\"hx:inline-flex hx:gap-1 hx:items-center hx:rounded-full hx:px-2.5 hx:leading-6 hx:text-[.65rem] %s%s\">%s</div></div></a>",
+		html.EscapeString(href),
+		html.EscapeString(label),
+		borderClass,
+		badgeClass,
+		html.EscapeString(label),
+	)
+}
+
+func renderHextraBadgeHTML(label, color string) string {
+	badgeClass := hextraBadgeColorClass(color)
+
+	return fmt.Sprintf(
+		"<div class=\"hextra-badge\"><div class=\"hx:inline-flex hx:gap-1 hx:items-center hx:rounded-full hx:px-2.5 hx:leading-6 hx:text-[.65rem] hx:border %s\">%s</div></div>",
+		badgeClass,
+		html.EscapeString(label),
+	)
+}
+
+func hextraBadgeColorClass(color string) string {
+	badgeClass := ""
+	switch color {
+	case "purple":
+		badgeClass = "hx:border-purple-200 hx:bg-purple-100 hx:text-purple-900 hx:dark:border-purple-200/30 hx:dark:bg-purple-900/30 hx:dark:text-purple-200"
+	case "indigo":
+		badgeClass = "hx:border-indigo-200 hx:bg-indigo-100 hx:text-indigo-900 hx:dark:border-indigo-200/30 hx:dark:bg-indigo-900/30 hx:dark:text-indigo-200"
+	case "blue":
+		badgeClass = "hx:border-blue-200 hx:bg-blue-100 hx:text-blue-900 hx:dark:border-blue-200/30 hx:dark:bg-blue-900/30 hx:dark:text-blue-200"
+	case "green":
+		badgeClass = "hx:border-green-200 hx:bg-green-100 hx:text-green-900 hx:dark:border-green-200/30 hx:dark:bg-green-900/30 hx:dark:text-green-200"
+	case "yellow":
+		badgeClass = "hx:border-yellow-100 hx:bg-yellow-50 hx:text-yellow-900 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-700/30 hx:dark:text-yellow-200"
+	case "orange":
+		badgeClass = "hx:border-orange-100 hx:bg-orange-50 hx:text-orange-800 hx:dark:border-orange-400/30 hx:dark:bg-orange-400/20 hx:dark:text-orange-300"
+	case "amber":
+		badgeClass = "hx:border-amber-200 hx:bg-amber-100 hx:text-amber-900 hx:dark:border-amber-200/30 hx:dark:bg-amber-900/30 hx:dark:text-amber-200"
+	case "red":
+		badgeClass = "hx:border-red-200 hx:bg-red-100 hx:text-red-900 hx:dark:border-red-200/30 hx:dark:bg-red-900/30 hx:dark:text-red-200"
+	default:
+		badgeClass = "hx:text-gray-600 hx:bg-gray-100 hx:dark:bg-neutral-800 hx:dark:text-neutral-200 hx:border-gray-200 hx:dark:border-neutral-700"
+	}
+
+	return badgeClass
+}
+
 func setIcon(_ string) string {
 	return "folder"
 }
 
-func variableCardTag(variable manifest.Var) (string, string) {
+func variableCardTag(variable manifest.Var) (string, string, string) {
 	if variable.IsSecret() {
-		return "secret", "yellow"
+		return "secret", "orange", "false"
 	}
-	return "", ""
+	if variable.IsReadonly() {
+		return "readonly", "yellow", "false"
+	}
+	return "", "", ""
+}
+
+func variableCardClass(variable manifest.Var) string {
+	var classes []string
+	if variable.IsReadonly() {
+		classes = append(classes, "read-only")
+	}
+	if variable.IsRequired() {
+		classes = append(classes, "[&:user-invalid]:hx:border-red-500 [&:user-invalid]:hx:bg-red-50 [&:user-invalid]:hx:dark:bg-red-900/20")
+	}
+	return strings.Join(classes, " ")
 }
 
 func variableCardSubtitle(variable manifest.Var) string {
@@ -677,9 +951,6 @@ func variableCardSubtitle(variable manifest.Var) string {
 	if defaultValue != "" {
 		if variable.IsSecret() {
 			parts = append(parts, "Default hidden")
-		} else {
-			indentedDefault := "    " + strings.ReplaceAll(defaultValue, "\n", "\n    ")
-			parts = append(parts, indentedDefault)
 		}
 	}
 
@@ -687,9 +958,32 @@ func variableCardSubtitle(variable manifest.Var) string {
 		parts = append(parts, "Example: `"+strings.TrimSpace(variable.Example)+"`")
 	}
 	if len(parts) == 0 {
-		return "Variable definition"
+		if defaultValue != "" || variable.IsSecret() {
+			return ""
+		}
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func variableCardHTML(variable manifest.Var) string {
+	defaultValue := strings.TrimSpace(variable.DefaultString())
+	if defaultValue == "" || variable.IsSecret() {
+		return ""
+	}
+
+	editable := "true"
+	preClass := "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors"
+	codeClass := "hx:block hx:whitespace-pre hx:font-mono hx:outline-none"
+	if variable.IsReadonly() {
+		editable = "false"
+		preClass += " hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100"
+		codeClass += " hx:cursor-default hx:select-text"
+	} else {
+		preClass += " hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100"
+		codeClass += " hx:cursor-text focus:hx:bg-white/60 hx:dark:focus:hx:bg-blue-950/20"
+	}
+
+	return fmt.Sprintf(`<div class="not-prose hx:px-4 hx:pb-4"><pre class="%s" data-editable="%s"><code class="%s" contenteditable="%s" spellcheck="false">%s</code></pre></div>`, preClass, editable, codeClass, editable, html.EscapeString(defaultValue))
 }
 
 func variableHeadingAnchor(key string) string {

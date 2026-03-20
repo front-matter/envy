@@ -226,7 +226,7 @@ func composeEnvironmentNodeBySet(sets []manifest.SetVars, flavor string) *yaml.N
 
 func composeEnvValue(v manifest.Var, flavor string) string {
 	defaultVal := v.DefaultString()
-	if !v.IsEditable() {
+	if v.IsReadonly() {
 		return defaultVal
 	}
 

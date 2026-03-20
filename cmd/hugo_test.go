@@ -21,13 +21,22 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 
 	m := &manifest.Manifest{
-		Meta:     manifest.Meta{Title: "Example", Description: "Example description", Version: "v1"},
-		Services: []manifest.Service{{Name: "web", Sets: []string{"common"}}},
+		Meta: manifest.Meta{Title: "Example", Description: "Example description", Version: "v1"},
+		Services: []manifest.Service{{
+			Name:     "web",
+			Image:    "caddy:2.10",
+			Platform: "linux/amd64",
+			Command:  []string{"caddy", "run", "--config", "/etc/caddy/Caddyfile"},
+			Sets:     []string{"common"},
+		}},
 		Sets: map[string]manifest.Set{
 			"common": {
 				Description: "Shared settings for runtime services.",
 				Link:        "https://example.org/common",
-				Vars:        []manifest.Var{{Key: "APP_ENV", Default: "production", Example: "staging"}},
+				Vars: []manifest.Var{
+					{Key: "APP_ENV", Default: "production", Example: "staging"},
+					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
+				},
 			},
 		},
 	}
@@ -52,10 +61,28 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	if !strings.Contains(string(indexContent), "title=\"common\"") {
 		t.Fatalf("expected generated sets index to render a card for common, got:\n%s", string(indexContent))
 	}
+	if !strings.Contains(string(indexContent), "iconImage=\"/images/properties.svg\"") {
+		t.Fatalf("expected generated sets index to render properties.svg icon, got:\n%s", string(indexContent))
+	}
+	indexChecks := []string{
+		"titleLink=\"/sets/common/\"",
+		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
+		"subtitle=`Shared settings for runtime services.`",
+		"subtitle2=`[https://example.org/common](https://example.org/common)`",
+		`tags="web"`,
+		`tagLinks="/services/#web"`,
+		`tagColor="red"`,
+		`tagBorder="false"`,
+	}
+	for _, check := range indexChecks {
+		if !strings.Contains(string(indexContent), check) {
+			t.Fatalf("expected generated sets index to contain %q, got:\n%s", check, string(indexContent))
+		}
+	}
 	if !strings.Contains(string(indexContent), "name: Sets") {
 		t.Fatalf("expected generated sets index to include menu metadata, got:\n%s", string(indexContent))
 	}
-	if !strings.Contains(string(indexContent), "{{< cards cols=\"3\" >}}") {
+	if !strings.Contains(string(indexContent), "{{< cards cols=\"2\" >}}") {
 		t.Fatalf("expected generated sets index to include cards shortcode, got:\n%s", string(indexContent))
 	}
 
@@ -94,19 +121,36 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	checks := []string{
 		"Shared settings for runtime services.",
-		"## Services",
-		"- web",
-		"## Documentation",
 		"https://example.org/common",
-		"## Variables",
 		"title=\"APP_ENV\"",
-		"link=\"#app_env\"",
 		`<div id="app_env">`,
+		"title=\"common\"",
+		"iconImage=\"/images/properties.svg\"",
+		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
+		"titleClass=\"hx:text-4xl md:hx:text-5xl hx:tracking-tight hx:pr-40 md:hx:pr-56\"",
+		"toc: false",
+		"subtitle=`Shared settings for runtime services.`",
+		"subtitle2=`[https://example.org/common](https://example.org/common)`",
+		`tags="web"`,
+		`tagLinks="/services/#web"`,
+		`tagColor="red"`,
+		`tagBorder="false"`,
+		`titlePadding="hx:py-4 hx:px-4"`,
+		`data-editable="true"`,
+		`hx:mb-4`,
+		`hx:border-blue-200 hx:bg-blue-50/70`,
+		`contenteditable="true" spellcheck="false">production</code>`,
+		`data-editable="false"`,
+		`hx:border-yellow-200 hx:bg-yellow-50/80`,
+		`contenteditable="false" spellcheck="false">locked-value</code>`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
 			t.Fatalf("expected generated set page to contain %q, got:\n%s", check, string(groupContent))
 		}
+	}
+	if strings.Contains(string(groupContent), "link=\"#app_env\"") {
+		t.Fatalf("expected generated set page variable cards to be non-clickable, got:\n%s", string(groupContent))
 	}
 
 	servicesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "services", "_index.md"))
@@ -115,8 +159,19 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	servicesChecks := []string{
 		"title: Services",
+		"hide: true",
 		"name: Services",
 		"title=\"web\"",
+		"titleLink=\"#web\"",
+		"titleClass=\"hx:pr-32 md:hx:pr-40\"",
+		"subtitle2=`**Image:** [caddy:2.10](https://hub.docker.com/_/caddy)`",
+		"subtitle3=`**Platform:** linux/amd64`",
+		"subtitle4=`**Command:**",
+		"caddy run --config /etc/caddy/Caddyfile",
+		`tags="common"`,
+		`tagLinks="/sets/common/"`,
+		`tagColor="blue"`,
+		`tagBorder="false"`,
 	}
 	for _, check := range servicesChecks {
 		if !strings.Contains(string(servicesIndexContent), check) {
@@ -128,7 +183,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("RemoveAll(contentDir): %v", err)
 	}
 }
-
 func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 	siteRoot := t.TempDir()
 	groupDir := filepath.Join(siteRoot, "content", "sets")
@@ -174,10 +228,6 @@ func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(siteRoot, "README.md"), []byte(readmeHome), 0o644); err != nil {
 		t.Fatalf("WriteFile(README.md): %v", err)
 	}
-	customHome := "# Custom Docs Home\n"
-	if err := os.WriteFile(filepath.Join(docsDir, "index.md"), []byte(customHome), 0o644); err != nil {
-		t.Fatalf("WriteFile(docs/index.md): %v", err)
-	}
 
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "Example"},
@@ -192,8 +242,8 @@ func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(_index.md): %v", err)
 	}
-	if string(homeContent) != customHome {
-		t.Fatalf("expected docs/index.md to override generated home page, got:\n%s", string(homeContent))
+	if string(homeContent) != readmeHome {
+		t.Fatalf("expected README.md to be used for home page, got:\n%s", string(homeContent))
 	}
 
 	if err := os.RemoveAll(contentDir); err != nil {

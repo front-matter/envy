@@ -338,7 +338,7 @@ type Var struct {
 	Default     string `yaml:"default,omitempty"`
 	Required    string `yaml:"required,omitempty"`
 	Secret      string `yaml:"secret,omitempty"`
-	Editable    string `yaml:"editable,omitempty"`
+	Readonly    string `yaml:"readonly,omitempty"`
 	Example     string `yaml:"example,omitempty"`
 }
 
@@ -372,8 +372,8 @@ func (v Var) IsSecret() bool {
 	return strings.EqualFold(strings.TrimSpace(v.Secret), "true")
 }
 
-func (v Var) IsEditable() bool {
-	return strings.EqualFold(strings.TrimSpace(v.Editable), "true")
+func (v Var) IsReadonly() bool {
+	return strings.EqualFold(strings.TrimSpace(v.Readonly), "true")
 }
 
 // MarshalYAML omits import placeholder descriptions and emits defaults as strings.
@@ -394,8 +394,8 @@ func (v Var) MarshalYAML() (interface{}, error) {
 	if v.IsSecret() {
 		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
-	if v.IsEditable() {
-		appendMapping(node, "editable", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
+	if v.IsReadonly() {
+		appendMapping(node, "readonly", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
 	}
 	if v.Example != "" {
 		appendMapping(node, "example", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Example})

@@ -28,7 +28,6 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 			Default:     "",
 			Description: "Imported from .env file",
 			Secret:      "true",
-			Editable:    "true",
 		})
 	}
 

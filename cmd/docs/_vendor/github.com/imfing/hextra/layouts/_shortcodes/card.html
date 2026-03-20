@@ -18,8 +18,14 @@
 */ -}}
 {{- $link := .Get "link" -}}
 {{- $title := .Get "title" -}}
+{{- $titleLink := .Get "titleLink" | default "" -}}
 {{- $icon := .Get "icon" -}}
+{{- $iconImage := .Get "iconImage" -}}
+{{- $iconImageClass := .Get "iconImageClass" | default "" -}}
 {{- $subtitle := .Get "subtitle" -}}
+{{- $subtitle2 := .Get "subtitle2" -}}
+{{- $subtitle3 := .Get "subtitle3" | default "" -}}
+{{- $subtitle4 := .Get "subtitle4" | default "" -}}
 {{- $image := .Get "image" -}}
 {{- $alt := .Get "alt" | default $title -}}
 {{- $width := 0 -}}
@@ -27,8 +33,15 @@
 {{- $imageStyle := .Get "imageStyle" -}}
 {{- $tag := .Get "tag" -}}
 {{- $tagColor := .Get "tagColor" | default (.Get "tagType") | default "" -}}{{- /* Compatibility with previous parameter. */ -}}
-{{- $tagBorder := not (eq (.Get "tagBorder") false) | default true }}
+{{- $tagBorder := ne (.Get "tagBorder") "false" -}}
 {{- $tagIcon := .Get "tagIcon" | default "" -}}
+{{- $titleClass := .Get "titleClass" | default "" -}}
+{{- $titlePadding := .Get "titlePadding" | default "" -}}
+{{- $class := .Get "class" | default "" -}}
+{{- $html := .Get "html" | default "" -}}
+{{- $tagHTML := .Get "tagHTML" | default "" -}}
+{{- $tags := .Get "tags" | default "" -}}
+{{- $tagLinks := .Get "tagLinks" | default "" -}}
 
 {{/* Image processing options */}}
 {{- $method := .Get "method" | default "Resize" | humanize -}}
@@ -57,8 +70,14 @@
   "page"        .Page
   "link"        $link
   "title"       $title
+  "titleLink"   $titleLink
   "icon"        $icon
+  "iconImage"   $iconImage
+  "iconImageClass" $iconImageClass
   "subtitle"    $subtitle
+  "subtitle2"   $subtitle2
+  "subtitle3"   $subtitle3
+  "subtitle4"   $subtitle4
   "image"       $image
   "alt"         $alt
   "width"       $width
@@ -68,5 +87,12 @@
   "tagType"     $tagColor
   "tagBorder"   $tagBorder
   "tagIcon"     $tagIcon
+  "titleClass"  $titleClass
+  "titlePadding" $titlePadding
+  "class"       $class
+  "html"        $html
+  "tagHTML"     $tagHTML
+  "tags"        $tags
+  "tagLinks"    $tagLinks
   )
 -}}

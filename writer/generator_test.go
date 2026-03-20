@@ -13,8 +13,8 @@ func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "REQ", Default: "x", Description: "required var", Required: "true", Editable: "true"},
-					{Key: "OPT", Default: "y", Description: "optional var", Required: "false", Editable: "true"},
+					{Key: "REQ", Default: "x", Description: "required var", Required: "true"},
+					{Key: "OPT", Default: "y", Description: "optional var", Required: "false"},
 				},
 			},
 		},
@@ -33,14 +33,14 @@ func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 	}
 }
 
-func TestGenerateSkipsNonEditableVars(t *testing.T) {
+func TestGenerateSkipsReadonlyVars(t *testing.T) {
 	m := &manifest.Manifest{
 		Meta: manifest.Meta{Title: "Example"},
 		Sets: map[string]manifest.Set{
 			"app": {
 				Vars: []manifest.Var{
-					{Key: "EDITABLE_VAR", Default: "x", Description: "included", Editable: "true"},
-					{Key: "LOCKED_VAR", Default: "y", Description: "excluded", Editable: "false"},
+					{Key: "EDITABLE_VAR", Default: "x", Description: "included"},
+					{Key: "LOCKED_VAR", Default: "y", Description: "excluded", Readonly: "true"},
 				},
 			},
 		},
@@ -49,9 +49,9 @@ func TestGenerateSkipsNonEditableVars(t *testing.T) {
 	output := Generate(m, Options{IncludeSecrets: true})
 
 	if !strings.Contains(output, "EDITABLE_VAR=x") {
-		t.Fatalf("expected editable variable in output, got:\n%s", output)
+		t.Fatalf("expected non-readonly variable in output, got:\n%s", output)
 	}
 	if strings.Contains(output, "LOCKED_VAR=y") {
-		t.Fatalf("did not expect non-editable variable in output, got:\n%s", output)
+		t.Fatalf("did not expect readonly variable in output, got:\n%s", output)
 	}
 }
