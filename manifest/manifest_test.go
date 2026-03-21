@@ -103,10 +103,10 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 	}
 
 	output := string(data)
-	if !strings.Contains(output, "\n    cache:\n") {
+	if !strings.Contains(output, "cache: {}") {
 		t.Fatalf("expected service without associated vars to be kept, got:\n%s", output)
 	}
-	if strings.Contains(output, "sets:\n    cache:") {
+	if strings.Contains(output, "x-set-cache:") {
 		t.Fatalf("expected empty set to be omitted, got:\n%s", output)
 	}
 }
@@ -195,8 +195,11 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 	if !strings.Contains(output, "command: [\"celery\", \"worker\"]") {
 		t.Fatalf("expected command in flow-list format, got:\n%s", output)
 	}
-	if !strings.Contains(output, "sets: [app]") {
-		t.Fatalf("expected service sets to be written as inline list, got:\n%s", output)
+	if !strings.Contains(output, "x-set-app: &app") {
+		t.Fatalf("expected app set to be written as anchored x-set key, got:\n%s", output)
+	}
+	if !strings.Contains(output, "environment:") || !strings.Contains(output, "<<: [*app]") {
+		t.Fatalf("expected service set refs to be written as environment merge aliases, got:\n%s", output)
 	}
 	if strings.Contains(output, "command:\n") {
 		t.Fatalf("did not expect block-list command format, got:\n%s", output)
@@ -225,7 +228,7 @@ func TestManifestMarshalVolumesAsComposeStyleMap(t *testing.T) {
 
 func TestManifestLoadVolumesFromComposeStyleMap(t *testing.T) {
 	input := strings.Join([]string{
-		"meta:",
+		"x-envy:",
 		"  title: Example",
 		"  version: v1",
 		"volumes:",
@@ -245,20 +248,19 @@ func TestManifestLoadVolumesFromComposeStyleMap(t *testing.T) {
 
 func TestManifestLoadServicesAndVars(t *testing.T) {
 	input := strings.Join([]string{
-		"meta:",
+		"x-envy:",
 		"  title: Example",
 		"  version: v1",
+		"x-set-application: &application",
+		"  description: App settings",
+		"  APP_ENV:",
+		"    default: production",
+		"    required: true",
 		"services:",
 		"  web:",
 		"    image: ghcr.io/example/web:latest",
-		"    sets: [application]",
-		"sets:",
-		"  application:",
-		"    description: App settings",
-		"    vars:",
-		"      APP_ENV:",
-		"        default: production",
-		"        required: true",
+		"    environment:",
+		"      <<: [*application]",
 	}, "\n")
 
 	var m Manifest
@@ -287,16 +289,16 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 
 func TestManifestLoadServiceScalarSet(t *testing.T) {
 	input := strings.Join([]string{
-		"meta:",
+		"x-envy:",
 		"  title: Example",
 		"  version: v1",
+		"x-set-coolify: &coolify",
+		"  description: Coolify settings",
 		"services:",
 		"  web:",
 		"    image: ghcr.io/example/web:latest",
-		"    sets: coolify",
-		"sets:",
-		"  coolify:",
-		"    description: Coolify settings",
+		"    environment:",
+		"      <<: *coolify",
 	}, "\n")
 
 	var m Manifest
@@ -314,15 +316,13 @@ func TestManifestLoadServiceScalarSet(t *testing.T) {
 
 func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 	input := strings.Join([]string{
-		"meta:",
+		"x-envy:",
 		"  title: Example",
 		"  version: v1",
-		"sets:",
-		"  app:",
-		"    vars:",
-		"      SECRET_KEY:",
-		"        default: super-secret",
-		"        secret: true",
+		"x-set-app: &app",
+		"  SECRET_KEY:",
+		"    default: super-secret",
+		"    secret: true",
 	}, "\n")
 
 	var m Manifest
@@ -349,15 +349,13 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 
 func TestManifestLoadGroupLink(t *testing.T) {
 	input := strings.Join([]string{
-		"meta:",
+		"x-envy:",
 		"  title: Example",
-		"sets:",
-		"  common:",
-		"    description: Shared settings",
-		"    link: https://example.org/common",
-		"    vars:",
-		"      APP_ENV:",
-		"        default: production",
+		"x-set-common: &common",
+		"  description: Shared settings",
+		"  link: https://example.org/common",
+		"  APP_ENV:",
+		"    default: production",
 	}, "\n")
 
 	var m Manifest
@@ -379,6 +377,62 @@ func TestManifestLoadGroupLink(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "link: https://example.org/common") {
 		t.Fatalf("expected marshaled YAML to contain set link, got:\n%s", string(data))
+	}
+}
+
+func TestManifestLoadSetDescriptionAndLinkFromComments(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"# Shared environment variables for web and worker.",
+		"# link: https://example.org/base",
+		"x-set-base: &base",
+		"  APP_ENV:",
+		"    default: production",
+	}, "\n")
+
+	var m Manifest
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["base"]
+	if !ok {
+		t.Fatalf("expected base set")
+	}
+	if set.Description != "Shared environment variables for web and worker." {
+		t.Fatalf("expected set description from comment, got %q", set.Description)
+	}
+	if set.Link != "https://example.org/base" {
+		t.Fatalf("expected set link from comment, got %q", set.Link)
+	}
+}
+
+func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"# Shared settings",
+		"# [Docs](https://example.org/docs)",
+		"x-set-common: &common",
+		"  APP_ENV:",
+		"    default: production",
+	}, "\n")
+
+	var m Manifest
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["common"]
+	if !ok {
+		t.Fatalf("expected common set")
+	}
+	if set.Description != "Shared settings" {
+		t.Fatalf("expected set description from comment, got %q", set.Description)
+	}
+	if set.Link != "https://example.org/docs" {
+		t.Fatalf("expected markdown link extraction, got %q", set.Link)
 	}
 }
 
@@ -479,6 +533,7 @@ func TestIsValidImageReference(t *testing.T) {
 
 func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 	m := &Manifest{
+		Meta: Meta{Title: "Example"},
 		Services: []Service{
 			{
 				Name:     "web",
@@ -492,23 +547,32 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 		},
 	}
 
-	warnings := strings.Join(m.Lint(), "\n")
+	issues := m.LintIssues()
+	joined := strings.Join(m.Lint(), "\n")
 
-	if !strings.Contains(warnings, "services.web: invalid image") {
-		t.Fatalf("expected invalid image warning, got %q", warnings)
+	if !strings.Contains(joined, "service-image-require-explicit-tag") || !strings.Contains(joined, "invalid image") {
+		t.Fatalf("expected invalid image lint issue, got %q", joined)
 	}
 
-	if !strings.Contains(warnings, "services.web: invalid platform") {
-		t.Fatalf("expected invalid platform warning, got %q", warnings)
+	foundPlatform := false
+	for _, issue := range issues {
+		if issue.Rule == "service-platform-format" {
+			foundPlatform = true
+			break
+		}
+	}
+	if !foundPlatform {
+		t.Fatalf("expected service-platform-format issue, got %#v", issues)
 	}
 }
 
 func TestLintAllowsMissingPlatform(t *testing.T) {
 	m := &Manifest{
+		Meta: Meta{Title: "Example"},
 		Services: []Service{
 			{
 				Name:  "web",
-				Image: "ghcr.io/front-matter/invenio-rdm-starter:latest",
+				Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
 				Sets:  []string{"application"},
 			},
 		},
@@ -517,9 +581,34 @@ func TestLintAllowsMissingPlatform(t *testing.T) {
 		},
 	}
 
-	for _, warning := range m.Lint() {
-		if strings.Contains(warning, "platform") {
-			t.Fatalf("unexpected platform warning: %q", warning)
+	for _, issue := range m.LintIssues() {
+		if issue.Rule == "service-platform-format" {
+			t.Fatalf("unexpected platform issue: %#v", issue)
 		}
+	}
+}
+
+func TestLintRejectsLatestTag(t *testing.T) {
+	m := &Manifest{
+		Meta: Meta{Title: "Example"},
+		Services: []Service{{
+			Name:  "web",
+			Image: "ghcr.io/front-matter/invenio-rdm-starter:latest",
+			Sets:  []string{"application"},
+		}},
+		Sets: map[string]Set{"application": {}},
+	}
+
+	issues := m.LintIssues()
+	found := false
+	for _, issue := range issues {
+		if issue.Rule == "service-image-require-explicit-tag" && issue.Level == "warning" && strings.Contains(issue.Message, "unstable tag") {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected unstable-tag lint issue, got %#v", issues)
 	}
 }

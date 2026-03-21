@@ -2,65 +2,85 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/fatih/color"
-	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
-	"github.com/front-matter/envy/validator"
 	"github.com/spf13/cobra"
 )
 
+var composeConfigRunner = runComposeConfigCLI
+
 var validateCmd = &cobra.Command{
 	Use:   "validate [path]",
-	Short: "Validate a .env file against env.yaml",
-	Long: `Validate environment variables against the env.yaml schema.
-Checks required fields and reports missing values.
+	Short: "Validate env.yaml as a valid Docker Compose file",
+	Long: `Validate env.yaml by running "compose config".
+This uses the local Docker Compose CLI and fails if the file is not a valid Compose configuration.
 
 Examples:
   envy validate
-	  envy validate .env.prod
-	  envy validate ./config`,
+	  envy validate env.yaml
+	  envy validate ./config/env.yaml`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := resolveManifest(manifestPath)
+		path, err := resolveValidateComposePath(args)
 		if err != nil {
 			return err
 		}
 
-		m, err := manifest.Load(path)
-		if err != nil {
+		if err := validateComposeFile(path); err != nil {
 			return err
 		}
 
-		envPath, err := resolveEnvInputPath(args)
-		if err != nil {
-			return err
-		}
-
-		ef, err := envfile.Load(envPath)
-		if err != nil {
-			return err
-		}
-
-		errs := validator.Validate(m, ef.Values)
-
-		if len(errs) > 0 {
-			color.Red("\n❌ %d validation error(s) in %s:\n", len(errs), envPath)
-			for _, e := range errs {
-				if e.Level == "MISSING" {
-					color.Red("  %s", e)
-				} else {
-					color.Yellow("  %s", e)
-				}
-			}
-			fmt.Println()
-			os.Exit(1)
-		}
-
-		color.Green("\n✅ %s is valid (%d vars checked)\n", envPath, len(ef.Values))
+		color.Green("\n✅ %s is a valid Compose file\n", path)
 		return nil
 	},
+}
+
+func resolveValidateComposePath(args []string) (string, error) {
+	if len(args) > 0 {
+		candidate := args[0]
+		if strings.HasSuffix(candidate, string(filepath.Separator)) {
+			candidate = filepath.Join(candidate, "env.yaml")
+		}
+		return candidate, nil
+	}
+
+	return resolveManifest(manifestPath)
+}
+
+func validateComposeFile(path string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolving compose file path %s: %w", path, err)
+	}
+
+	output, err := composeConfigRunner(absPath)
+	if err != nil {
+		if strings.TrimSpace(output) != "" {
+			return fmt.Errorf("invalid compose file %s: %w\n%s", path, err, strings.TrimSpace(output))
+		}
+		return fmt.Errorf("invalid compose file %s: %w", path, err)
+	}
+
+	return nil
+}
+
+func runComposeConfigCLI(path string) (string, error) {
+	if _, err := exec.LookPath("docker"); err == nil {
+		cmd := exec.Command("docker", "compose", "-f", path, "config", "-q")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	if _, err := exec.LookPath("docker-compose"); err == nil {
+		cmd := exec.Command("docker-compose", "-f", path, "config", "-q")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+
+	return "", fmt.Errorf("docker compose CLI not found (tried 'docker compose' and 'docker-compose')")
 }
 
 func init() {

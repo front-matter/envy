@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/front-matter/envy/manifest"
@@ -28,15 +29,38 @@ Examples:
 			return err
 		}
 
-		warnings := m.Lint()
-		if len(warnings) == 0 {
-			color.Green("No lint warnings in %s", path)
+		issues := m.LintIssues()
+		if len(issues) == 0 {
+			color.Green("No lint findings in %s", path)
 			return nil
 		}
 
-		color.Yellow("%d lint warning(s) in %s:", len(warnings), path)
-		for _, w := range warnings {
-			fmt.Printf("  - %s\n", w)
+		errorCount := 0
+		warningCount := 0
+
+		for _, issue := range issues {
+			if issue.Level == "error" {
+				errorCount++
+			} else {
+				warningCount++
+			}
+		}
+
+		color.Yellow("%d lint finding(s) in %s (%d error(s), %d warning(s)):", len(issues), path, errorCount, warningCount)
+		for _, issue := range issues {
+			line := fmt.Sprintf("  - [%s] %s", issue.Rule, issue.Message)
+			if issue.Path != "" {
+				line = fmt.Sprintf("%s (%s)", line, issue.Path)
+			}
+			if issue.Level == "error" {
+				color.Red(line)
+			} else {
+				color.Yellow(line)
+			}
+		}
+
+		if errorCount > 0 {
+			os.Exit(1)
 		}
 		return nil
 	},

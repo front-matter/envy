@@ -12,12 +12,15 @@ import (
 )
 
 var dockerImagePattern = regexp.MustCompile(`^([A-Za-z0-9.-]+(?::[0-9]+)?/)?[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*:[A-Za-z0-9=_:+.-]+)?$`)
+var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\((https?://[^)\s]+)\)`)
+var plainLinkPattern = regexp.MustCompile(`^https?://\S+$`)
+var prefixedLinkPattern = regexp.MustCompile(`(?i)^link:\s*(https?://\S+)$`)
 
 // Manifest is the top-level env.yaml structure.
 type Manifest struct {
-	Meta     Meta           `yaml:"meta"`
+	Meta     Meta           `yaml:"x-envy"`
 	Services []Service      `yaml:"services,omitempty"`
-	Sets     map[string]Set `yaml:"sets,omitempty"`
+	Sets     map[string]Set `yaml:"-"`
 	Volumes  []string       `yaml:"volumes,omitempty"`
 	Networks []string       `yaml:"networks,omitempty"`
 }
@@ -32,31 +35,15 @@ func (m Manifest) MarshalYAML() (interface{}, error) {
 	}
 
 	root := &yaml.Node{Kind: yaml.MappingNode}
+	setNodes := make(map[string]*yaml.Node, len(filteredSets))
 
 	metaNode, err := encodeNode(m.Meta)
 	if err != nil {
 		return nil, err
 	}
-	appendMapping(root, "meta", metaNode)
-
-	if len(m.Services) > 0 {
-		servicesNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, svc := range m.Services {
-			serviceNode, err := svc.MarshalYAML()
-			if err != nil {
-				return nil, err
-			}
-			encoded, err := encodeNode(serviceNode)
-			if err != nil {
-				return nil, err
-			}
-			appendMapping(servicesNode, svc.Name, encoded)
-		}
-		appendMapping(root, "services", servicesNode)
-	}
+	appendMapping(root, "x-envy", metaNode)
 
 	if len(filteredSets) > 0 {
-		setsNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, set := range m.OrderedSets() {
 			filtered, ok := filteredSets[set.Key]
 			if !ok {
@@ -66,9 +53,22 @@ func (m Manifest) MarshalYAML() (interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
-			appendMapping(setsNode, set.Key, setNode)
+			setNode.Anchor = set.Key
+			setNodes[set.Key] = setNode
+			appendMapping(root, "x-set-"+set.Key, setNode)
 		}
-		appendMapping(root, "sets", setsNode)
+	}
+
+	if len(m.Services) > 0 {
+		servicesNode := &yaml.Node{Kind: yaml.MappingNode}
+		for _, svc := range m.Services {
+			encoded, err := encodeServiceNode(svc, setNodes)
+			if err != nil {
+				return nil, err
+			}
+			appendMapping(servicesNode, svc.Name, encoded)
+		}
+		appendMapping(root, "services", servicesNode)
 	}
 
 	if len(m.Volumes) > 0 {
@@ -98,6 +98,10 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 		value := node.Content[i+1]
 
 		switch key {
+		case "x-envy":
+			if err := value.Decode(&out.Meta); err != nil {
+				return err
+			}
 		case "meta":
 			if err := value.Decode(&out.Meta); err != nil {
 				return err
@@ -114,16 +118,42 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 			out.Sets = sets
-		case "volumes":
-			volumes, err := decodeNamedEntriesNode(value)
-			if err != nil {
-				return err
+		default:
+			if strings.HasPrefix(key, "x-set-") {
+				setKey := strings.TrimPrefix(key, "x-set-")
+				set, err := decodeSetNode(value)
+				if err != nil {
+					return err
+				}
+
+				description, link := parseSetMetadataFromComments(node.Content[i].HeadComment, value.HeadComment)
+				if set.Description == "" {
+					set.Description = description
+				}
+				if set.Link == "" {
+					set.Link = link
+				}
+
+				if out.Sets == nil {
+					out.Sets = make(map[string]Set)
+				}
+				out.Sets[setKey] = set
+				continue
 			}
-			out.Volumes = volumes
-		case "networks":
-			if err := value.Decode(&out.Networks); err != nil {
-				return err
+
+			switch key {
+			case "volumes":
+				volumes, err := decodeNamedEntriesNode(value)
+				if err != nil {
+					return err
+				}
+				out.Volumes = volumes
+			case "networks":
+				if err := value.Decode(&out.Networks); err != nil {
+					return err
+				}
 			}
+			continue
 		}
 	}
 
@@ -166,7 +196,7 @@ type Service struct {
 	Entrypoint  []string `yaml:"entrypoint,omitempty"`
 	Command     []string `yaml:"command,omitempty"`
 	Description string   `yaml:"description,omitempty"`
-	Sets        []string `yaml:"sets,omitempty"`
+	Sets        []string `yaml:"-"`
 }
 
 type serviceYAML struct {
@@ -243,6 +273,14 @@ func (s *Service) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 			out.Sets = sets
+		case "environment":
+			sets, err := decodeServiceEnvironmentSetRefs(value)
+			if err != nil {
+				return err
+			}
+			if len(sets) > 0 {
+				out.Sets = sets
+			}
 		}
 	}
 
@@ -443,7 +481,6 @@ func encodeSetNode(set Set) (*yaml.Node, error) {
 		appendMapping(setNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Link})
 	}
 	if len(set.Vars) > 0 {
-		varsNode := &yaml.Node{Kind: yaml.MappingNode}
 		for _, v := range set.Vars {
 			varNodeValue, err := v.MarshalYAML()
 			if err != nil {
@@ -456,11 +493,56 @@ func encodeSetNode(set Set) (*yaml.Node, error) {
 			if encoded.Kind != yaml.MappingNode {
 				return nil, fmt.Errorf("expected var mapping, got YAML kind %d", encoded.Kind)
 			}
-			appendMapping(varsNode, v.Key, encoded)
+			appendMapping(setNode, v.Key, encoded)
 		}
-		appendMapping(setNode, "vars", varsNode)
 	}
 	return setNode, nil
+}
+
+func encodeServiceNode(svc Service, setNodes map[string]*yaml.Node) (*yaml.Node, error) {
+	serviceNode := &yaml.Node{Kind: yaml.MappingNode}
+
+	if svc.Image != "" {
+		appendMapping(serviceNode, "image", &yaml.Node{Kind: yaml.ScalarNode, Value: svc.Image})
+	}
+	if svc.Platform != "" {
+		appendMapping(serviceNode, "platform", &yaml.Node{Kind: yaml.ScalarNode, Value: svc.Platform})
+	}
+	if len(svc.Entrypoint) > 0 {
+		entrypointNode := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+		for _, item := range svc.Entrypoint {
+			entrypointNode.Content = append(entrypointNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: item})
+		}
+		appendMapping(serviceNode, "entrypoint", entrypointNode)
+	}
+	if len(svc.Command) > 0 {
+		commandNode := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+		for _, item := range svc.Command {
+			commandNode.Content = append(commandNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: item})
+		}
+		appendMapping(serviceNode, "command", commandNode)
+	}
+	if svc.Description != "" {
+		appendMapping(serviceNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: svc.Description})
+	}
+
+	if len(svc.Sets) > 0 {
+		environmentNode := &yaml.Node{Kind: yaml.MappingNode}
+		mergeNode := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+		for _, setKey := range svc.Sets {
+			setNode, ok := setNodes[setKey]
+			if !ok {
+				continue
+			}
+			mergeNode.Content = append(mergeNode.Content, &yaml.Node{Kind: yaml.AliasNode, Value: setNode.Anchor, Alias: setNode})
+		}
+		if len(mergeNode.Content) > 0 {
+			appendMapping(environmentNode, "<<", mergeNode)
+			appendMapping(serviceNode, "environment", environmentNode)
+		}
+	}
+
+	return serviceNode, nil
 }
 
 func decodeServicesNode(node *yaml.Node) ([]Service, error) {
@@ -521,9 +603,122 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				return out, err
 			}
 			out.Vars = vars
+		default:
+			if value.Kind == yaml.ScalarNode {
+				var scalar string
+				if err := value.Decode(&scalar); err != nil {
+					return out, err
+				}
+				out.Vars = append(out.Vars, Var{Key: key, Default: scalar})
+				continue
+			}
+
+			var v Var
+			if err := value.Decode(&v); err != nil {
+				return out, err
+			}
+			v.Key = key
+			out.Vars = append(out.Vars, v)
 		}
 	}
 	return out, nil
+}
+
+func parseSetMetadataFromComments(comments ...string) (string, string) {
+	var descriptionParts []string
+	link := ""
+
+	for _, raw := range comments {
+		for _, line := range strings.Split(raw, "\n") {
+			clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+			if clean == "" {
+				continue
+			}
+
+			if link == "" {
+				if matches := markdownLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
+					link = matches[1]
+					continue
+				}
+				if matches := prefixedLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
+					link = matches[1]
+					continue
+				}
+				if plainLinkPattern.MatchString(clean) {
+					link = clean
+					continue
+				}
+			}
+
+			descriptionParts = append(descriptionParts, clean)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(descriptionParts, " ")), link
+}
+
+func decodeServiceEnvironmentSetRefs(node *yaml.Node) ([]string, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{})
+	var sets []string
+
+	addSet := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		sets = append(sets, name)
+	}
+
+	for i := 0; i < len(node.Content); i += 2 {
+		key := node.Content[i].Value
+		if key != "<<" {
+			continue
+		}
+		value := node.Content[i+1]
+
+		collectFromNode := func(n *yaml.Node) {
+			if n == nil {
+				return
+			}
+			switch n.Kind {
+			case yaml.AliasNode:
+				if n.Alias != nil {
+					addSet(n.Alias.Anchor)
+				}
+				if strings.HasPrefix(n.Value, "*") {
+					addSet(strings.TrimPrefix(n.Value, "*"))
+				}
+			case yaml.MappingNode:
+				addSet(n.Anchor)
+			case yaml.ScalarNode:
+				if strings.HasPrefix(n.Value, "*") {
+					addSet(strings.TrimPrefix(n.Value, "*"))
+				}
+			}
+		}
+
+		switch value.Kind {
+		case yaml.SequenceNode:
+			for _, item := range value.Content {
+				collectFromNode(item)
+			}
+		default:
+			collectFromNode(value)
+		}
+	}
+
+	return sets, nil
 }
 
 func decodeVarsNode(node *yaml.Node) ([]Var, error) {
@@ -592,6 +787,21 @@ type SetVars struct {
 	SetKey      string
 	Description string
 	Vars        []Var
+}
+
+// LintIssue represents one lint finding.
+type LintIssue struct {
+	Level   string // error | warning
+	Rule    string
+	Path    string
+	Message string
+}
+
+func (i LintIssue) String() string {
+	if i.Path == "" {
+		return fmt.Sprintf("[%s] %s: %s", strings.ToUpper(i.Level), i.Rule, i.Message)
+	}
+	return fmt.Sprintf("[%s] %s: %s: %s", strings.ToUpper(i.Level), i.Rule, i.Path, i.Message)
 }
 
 // VarsForServiceBySet returns vars per set for a service, preserving set order.
@@ -677,54 +887,150 @@ func (m *Manifest) RequiredVars() []Var {
 
 // Lint returns warnings for values that are legal but potentially ambiguous.
 func (m *Manifest) Lint() []string {
-	var warnings []string
+	issues := m.LintIssues()
+	warnings := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		warnings = append(warnings, issue.String())
+	}
+	return warnings
+}
+
+// LintIssues returns DCLint-inspired lint findings with severity and rule IDs.
+func (m *Manifest) LintIssues() []LintIssue {
+	var issues []LintIssue
 	seenServices := make(map[string]bool)
+
+	if strings.TrimSpace(m.Meta.Title) == "" {
+		issues = append(issues, LintIssue{
+			Level:   "warning",
+			Rule:    "require-project-name-field",
+			Path:    "x-envy.title",
+			Message: "project name is not set",
+		})
+	}
+
+	if !areServiceNamesSorted(m.Services) {
+		issues = append(issues, LintIssue{
+			Level:   "warning",
+			Rule:    "services-alphabetical-order",
+			Path:    "services",
+			Message: "services should be sorted alphabetically",
+		})
+	}
 
 	for _, svc := range m.Services {
 		if strings.TrimSpace(svc.Name) == "" {
-			warnings = append(warnings, "services: found service with empty name")
+			issues = append(issues, LintIssue{
+				Level:   "error",
+				Rule:    "service-name-not-empty",
+				Path:    "services",
+				Message: "found service with empty name",
+			})
 			continue
 		}
 
 		if seenServices[svc.Name] {
-			warnings = append(warnings, fmt.Sprintf(
-				"services.%s: duplicate service name",
-				svc.Name,
-			))
+			issues = append(issues, LintIssue{
+				Level:   "error",
+				Rule:    "no-duplicate-service-names",
+				Path:    fmt.Sprintf("services.%s", svc.Name),
+				Message: "duplicate service name",
+			})
 		}
 		seenServices[svc.Name] = true
 
 		if strings.TrimSpace(svc.Image) == "" {
-			warnings = append(warnings, fmt.Sprintf(
-				"services.%s: no image configured",
-				svc.Name,
-			))
+			issues = append(issues, LintIssue{
+				Level:   "error",
+				Rule:    "service-image-require-explicit-tag",
+				Path:    fmt.Sprintf("services.%s.image", svc.Name),
+				Message: "no image configured",
+			})
 		} else if !isValidImageReference(strings.TrimSpace(svc.Image)) {
-			warnings = append(warnings, fmt.Sprintf(
-				"services.%s: invalid image %q - expected docker image reference like ghcr.io/org/app:tag",
-				svc.Name, svc.Image,
-			))
+			issues = append(issues, LintIssue{
+				Level:   "error",
+				Rule:    "service-image-require-explicit-tag",
+				Path:    fmt.Sprintf("services.%s.image", svc.Name),
+				Message: fmt.Sprintf("invalid image %q - expected docker image reference like ghcr.io/org/app:tag", svc.Image),
+			})
+		} else if !hasExplicitImageTag(strings.TrimSpace(svc.Image)) {
+			issues = append(issues, LintIssue{
+				Level:   "error",
+				Rule:    "service-image-require-explicit-tag",
+				Path:    fmt.Sprintf("services.%s.image", svc.Name),
+				Message: fmt.Sprintf("image %q has no explicit tag or digest", svc.Image),
+			})
+		} else if hasUnstableImageTag(strings.TrimSpace(svc.Image)) {
+			issues = append(issues, LintIssue{
+				Level:   "warning",
+				Rule:    "service-image-require-explicit-tag",
+				Path:    fmt.Sprintf("services.%s.image", svc.Name),
+				Message: fmt.Sprintf("image %q uses unstable tag; avoid latest/stable/dev/main/master", svc.Image),
+			})
 		}
 
 		platform := strings.TrimSpace(svc.Platform)
 		if platform != "" && !isValidPlatform(platform) {
-			warnings = append(warnings, fmt.Sprintf(
-				"services.%s: invalid platform %q - expected os/arch or os/arch/variant",
-				svc.Name, platform,
-			))
+			issues = append(issues, LintIssue{
+				Level:   "warning",
+				Rule:    "service-platform-format",
+				Path:    fmt.Sprintf("services.%s.platform", svc.Name),
+				Message: fmt.Sprintf("invalid platform %q - expected os/arch or os/arch/variant", platform),
+			})
 		}
 
 		for _, setKey := range svc.Sets {
 			if _, ok := m.Sets[setKey]; !ok {
-				warnings = append(warnings, fmt.Sprintf(
-					"services.%s: unknown set %q",
-					svc.Name, setKey,
-				))
+				issues = append(issues, LintIssue{
+					Level:   "warning",
+					Rule:    "service-references-existing-set",
+					Path:    fmt.Sprintf("services.%s.environment", svc.Name),
+					Message: fmt.Sprintf("unknown set %q", setKey),
+				})
 			}
 		}
 	}
 
-	return warnings
+	return issues
+}
+
+func areServiceNamesSorted(services []Service) bool {
+	if len(services) < 2 {
+		return true
+	}
+	for i := 1; i < len(services); i++ {
+		if services[i-1].Name > services[i].Name {
+			return false
+		}
+	}
+	return true
+}
+
+func hasExplicitImageTag(image string) bool {
+	if strings.Contains(image, "@") {
+		return true
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	return lastColon > lastSlash
+}
+
+func hasUnstableImageTag(image string) bool {
+	if strings.Contains(image, "@") {
+		return false
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon <= lastSlash {
+		return false
+	}
+	tag := strings.ToLower(strings.TrimSpace(image[lastColon+1:]))
+	switch tag {
+	case "latest", "stable", "dev", "main", "master":
+		return true
+	default:
+		return false
+	}
 }
 
 // Load reads and parses an env.yaml file.

@@ -213,7 +213,7 @@ func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	if strings.Contains(output, "sets:") {
 		t.Fatalf("expected sets section to be omitted when all vars are secret, got:\n%s", output)
 	}
-	if !strings.Contains(output, "meta:") {
+	if !strings.Contains(output, "x-envy:") {
 		t.Fatalf("expected meta section in generated env.yaml, got:\n%s", output)
 	}
 }
@@ -223,7 +223,7 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
-			Sets:  []string{"worker"},
+			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]manifest.Set{
 			"worker": {
@@ -242,7 +242,7 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 		Services: []manifest.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
-			Sets:  []string{"worker"},
+			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]manifest.Set{
 			"worker": {
