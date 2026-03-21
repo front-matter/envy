@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/front-matter/envy/compose"
 	"github.com/spf13/cobra"
 )
 
@@ -14,14 +15,14 @@ var composeConfigRunner = runComposeConfigCLI
 
 var validateCmd = &cobra.Command{
 	Use:   "validate [path]",
-	Short: "Validate compose.yaml as a valid Docker Compose file",
-	Long: `Validate compose.yaml by running "compose config".
+	Short: "Validate compose manifest as a valid Docker Compose file",
+	Long: `Validate a compose manifest by running "compose config".
 This uses the local Docker Compose CLI and fails if the file is not a valid Compose configuration.
 
 Examples:
   envy validate
-	  envy validate compose.yaml
-	  envy validate ./config/compose.yaml`,
+	  envy validate compose.yml
+	  envy validate ./config/compose.yml`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := resolveValidateComposePath(args)
@@ -42,7 +43,7 @@ func resolveValidateComposePath(args []string) (string, error) {
 	if len(args) > 0 {
 		candidate := args[0]
 		if strings.HasSuffix(candidate, string(filepath.Separator)) {
-			candidate = filepath.Join(candidate, "compose.yaml")
+			candidate = filepath.Join(candidate, compose.DefaultManifestFilename)
 		}
 		return candidate, nil
 	}

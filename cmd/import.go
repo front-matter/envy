@@ -23,14 +23,14 @@ var (
 
 var importCmd = &cobra.Command{
 	Use:   "import [path]",
-	Short: "Import .env files to generate compose.yaml",
-	Long: `Import .env files and convert them into a compose.yaml compose.
+	Short: "Import .env files to generate compose.yml",
+	Long: `Import .env files and convert them into a compose.yml compose.
 
 Auto-detection: If no files are specified, the command looks for .env and .env.example
 in the current directory.
 
 File paths: The --file flag can be either a folder or a file path ending in .yaml/.yml.
-- Folder: creates the folder if needed and writes to folder/compose.yaml
+- Folder: creates the folder if needed and writes to folder/compose.yml
 - File: .yaml/.yml file path, creates parent directories as needed
 
 Examples:
@@ -125,7 +125,7 @@ func importFile(path string) (*compose.Project, error) {
 // resolvePath determines the final file path.
 // If the path ends with .yaml or .yml, it's used as the file path.
 // If the path is a folder (or doesn't have a yaml extension), it creates the folder
-// and returns path/compose.yaml.
+// and returns path/compose.yml.
 // Rejects any other file extensions.
 func resolvePath(path string) (string, error) {
 	lower := strings.ToLower(path)
@@ -154,7 +154,7 @@ func resolvePath(path string) (string, error) {
 		return "", fmt.Errorf("creating directory %s: %w", path, err)
 	}
 
-	return filepath.Join(path, "compose.yaml"), nil
+	return filepath.Join(path, compose.DefaultManifestFilename), nil
 }
 
 func FileExists(path string) (bool, error) {
@@ -231,8 +231,8 @@ func findImportFiles(dir string) ([]string, error) {
 
 func init() {
 	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().StringVarP(&importFilePath, "file", "f", "compose.yaml",
-		"File path: folder name (creates folder and writes compose.yaml) or .yaml/.yml file path (creates parent folders as needed)")
+	importCmd.Flags().StringVarP(&importFilePath, "file", "f", compose.DefaultManifestFilename,
+		"File path: folder name (creates folder and writes compose.yml) or .yaml/.yml file path (creates parent folders as needed)")
 }
 
 func verifyServiceCommandVarsDefined(m *compose.Project) []string {

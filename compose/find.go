@@ -6,7 +6,16 @@ import (
 	"path/filepath"
 )
 
-// Find walks up from the current directory looking for compose.yaml.
+const DefaultManifestFilename = "compose.yml"
+
+var ManifestFilenames = []string{
+	"compose.yml",
+	"compose.yaml",
+	"docker-compose.yml",
+	"docker-compose.yaml",
+}
+
+// Find walks up from the current directory looking for a compose manifest.
 func Find() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -14,9 +23,11 @@ func Find() (string, error) {
 	}
 
 	for {
-		candidate := filepath.Join(dir, "compose.yaml")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		for _, name := range ManifestFilenames {
+			candidate := filepath.Join(dir, name)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -25,6 +36,6 @@ func Find() (string, error) {
 		dir = parent
 	}
 	return "", errors.New(
-		"compose.yaml not found — run from your instance root or pass --manifest",
+		"compose manifest not found (tried compose.yml, compose.yaml, docker-compose.yml, docker-compose.yaml) — run from your instance root or pass --manifest",
 	)
 }

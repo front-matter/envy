@@ -37,7 +37,7 @@ func TestResolvePathFolder(t *testing.T) {
 		t.Fatalf("resolvePath(folder): %v", err)
 	}
 
-	want := filepath.Join(folder, "compose.yaml")
+	want := filepath.Join(folder, "compose.yml")
 	if got != want {
 		t.Fatalf("resolvePath(folder) = %q, want %q", got, want)
 	}
@@ -149,7 +149,7 @@ func TestFindImportFilesUsesEnvExampleWhenEnvMissing(t *testing.T) {
 func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	tmp := t.TempDir()
 	envPath := filepath.Join(tmp, ".env")
-	outputPath := filepath.Join(tmp, "compose.yaml")
+	outputPath := filepath.Join(tmp, "compose.yml")
 
 	envContent := "BOOL_TRUE=true\nBOOL_FALSE=false\n"
 	if err := os.WriteFile(envPath, []byte(envContent), 0o644); err != nil {
