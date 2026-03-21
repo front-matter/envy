@@ -1,13 +1,22 @@
 # Envy configuration
 x-envy:
-  title: Envy
-  description: >
-    Envy is an environment variable manager for Docker. This website renders the automatic documentation
-    for the compose.yaml example file included with the GitHub repo.
-  languageCode: en-US
-  ignoreLogs:
+  HUGO_TITLE: Envy
+  HUGO_PARAMS_DESCRIPTION: >
+    Envy is an environment variable manager for Docker. This website renders the automatic documentation for the compose.yaml example file included with the GitHub repo.
+  HUGO_LANGUAGE_CODE: en-US
+  HUGO_IGNORE_LOGS:
     - warning-goldmark-raw-html
-  markupGoldmarkUnsafe: "true"
+  HUGO_MARKUP_GOLDMARK_UNSAFE: "true"
+  HUGO_DEFAULT_CONTENT_LANGUAGE: "en"
+  HUGO_DEFAULT_CONTENT_LANGUAGE_IN_SUBDIR: "false"
+  HUGO_LANGUAGES: |
+    en:
+      languageName: English
+      weight: 1
+    de:
+      languageName: Deutsch
+      weight: 2
+
 # Shared environment variables for web and worker.
 # [Configure language(s) and locale(s) (i18n and l10n)]: https://inveniordm.docs.cern.ch/operate/customize/i18n-and-l10n/
 x-set-base: &base
@@ -25,8 +34,8 @@ x-set-base: &base
   TEST_REQUIRED_VAR: "${TEST_REQUIRED_VAR:-?required-value}"
   # This is a secret test variable where the value is never exposed
   TEST_SECRET_VAR:
-# Authentication configuration.
-# [Authentication]: https://inveniordm.docs.cern.ch/operate/customize/authentication/
+    # Authentication configuration.
+    # [Authentication]: https://inveniordm.docs.cern.ch/operate/customize/authentication/
 x-set-authentication: &authentication
   INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY: "${INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY:-restricted}"
   INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED: "${INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED:-true}"
@@ -108,35 +117,25 @@ x-set-web: &web
 services:
   cache:
     image: valkey/valkey:7.2.5-bookworm
-    command: ["valkey-server", "--loglevel", "warning"]
+    command: [ "valkey-server", "--loglevel", "warning" ]
   db:
     image: postgres:17.4-bookworm
     environment:
-      <<: [*db]
+      <<: [ *db ]
   proxy:
     image: caddy:2.10
   search:
     image: opensearchproject/opensearch:2.18.0
     environment:
-      <<: [*search]
+      <<: [ *search ]
   web:
     image: ghcr.io/front-matter/invenio-rdm-starter:latest
     platform: linux/amd64
     environment:
-      <<: [*base, *web, *authentication, *mail, *s3]
+      <<: [ *base, *web, *authentication, *mail, *s3 ]
   worker:
     image: ghcr.io/front-matter/invenio-rdm-starter:latest
     platform: linux/amd64
-    command:
-      [
-        "celery",
-        "-A",
-        "invenio_app.celery",
-        "worker",
-        "--beat",
-        "--schedule=/tmp/celerybeat-schedule",
-        "--events",
-        "--loglevel=WARNING",
-      ]
+    command: [ "celery", "-A", "invenio_app.celery", "worker", "--beat", "--schedule=/tmp/celerybeat-schedule", "--events", "--loglevel=WARNING" ]
     environment:
-      <<: [*base, *cache, *doi, *mail, *s3]
+      <<: [ *base, *cache, *doi, *mail, *s3 ]

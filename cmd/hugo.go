@@ -9,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/front-matter/envy/compose"
 	"github.com/spf13/cobra"
@@ -17,6 +19,12 @@ import (
 )
 
 const hugoModuleVersion = "github.com/gohugoio/hugo@v0.156.0"
+
+var (
+	docsI18nOnce sync.Once
+	docsI18n     map[string]map[string]string
+	docsI18nErr  error
+)
 
 var buildCmd = &cobra.Command{
 	Use:                "build [hugo flags]",
@@ -240,63 +248,71 @@ func extractDocsFS(dst string) error {
 }
 
 func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL string) error {
-	lookup := make(map[string]compose.Var)
-	for _, v := range m.AllVars() {
-		lookup[v.Key] = v
+	lookup := buildVarLookup(m)
+	defaultLanguage := strings.TrimSpace(hugoConfigValue(m.Meta.HugoDefaultLanguage, lookup, "HUGO_DEFAULT_CONTENT_LANGUAGE"))
+	if defaultLanguage == "" {
+		defaultLanguage = "en"
 	}
+	menuMain := localizedMenuMain(defaultLanguage, repoURL, false)
 
 	config := map[string]interface{}{
 		"module": map[string]interface{}{
 			"imports": []map[string]string{{"path": "github.com/imfing/hextra"}},
 		},
 		"menu": map[string]interface{}{
-			"main": []map[string]interface{}{
-				{
-					"name":   "Search",
-					"weight": 100,
-					"params": map[string]string{"type": "search"},
-				},
-				{
-					"name":   "Theme",
-					"weight": 110,
-					"params": map[string]string{"type": "theme-toggle"},
-				},
-			},
+			"main": menuMain,
 		},
-	}
-
-	if repoURL != "" {
-		menu := config["menu"].(map[string]interface{})
-		mainMenu := menu["main"].([]map[string]interface{})
-		mainMenu = append(mainMenu, map[string]interface{}{
-			"name":   "GitHub",
-			"url":    repoURL,
-			"weight": 120,
-			"params": map[string]string{"icon": "github"},
-		})
-		menu["main"] = mainMenu
 	}
 
 	if m.Meta.Docs != "" {
 		config["baseURL"] = m.Meta.Docs
 	}
 	config["languageCode"] = m.Meta.LanguageCodeLabel()
-	if v, ok := lookup["HUGO_LANGUAGE_CODE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config["languageCode"] = v.DefaultString()
+	if value := hugoConfigValue(m.Meta.HugoLanguageCode, lookup, "HUGO_LANGUAGE_CODE"); value != "" {
+		config["languageCode"] = value
 	}
-	if v, ok := lookup["HUGO_DEFAULT_CONTENT_LANGUAGE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config["defaultContentLanguage"] = v.DefaultString()
+	if value := hugoConfigValue(m.Meta.HugoDefaultLanguage, lookup, "HUGO_DEFAULT_CONTENT_LANGUAGE"); value != "" {
+		config["defaultContentLanguage"] = value
 	}
-	if v, ok := lookup["HUGO_TITLE"]; ok && strings.TrimSpace(v.DefaultString()) != "" {
-		config["title"] = v.DefaultString()
+	if value := hugoConfigValue(m.Meta.HugoDefaultInSubdir, lookup, "HUGO_DEFAULT_CONTENT_LANGUAGE_IN_SUBDIR"); value != "" {
+		if parsed, ok := parseBoolString(value); ok {
+			config["defaultContentLanguageInSubdir"] = parsed
+		}
+	}
+	if value := hugoConfigValue(m.Meta.HugoLanguages, lookup, "HUGO_LANGUAGES"); value != "" {
+		languages, err := parseHugoLanguages(value)
+		if err != nil {
+			return fmt.Errorf("parsing HUGO_LANGUAGES: %w", err)
+		}
+		includeLanguageSwitch := len(languages) > 1
+		config["languages"] = localizedLanguagesConfig(languages, repoURL, includeLanguageSwitch)
+
+		if includeLanguageSwitch {
+			config["menu"] = map[string]interface{}{
+				"main": localizedMenuMain(defaultLanguage, repoURL, true),
+			}
+		}
+	}
+	if value := hugoConfigValue(m.Meta.HugoTitle, lookup, "HUGO_TITLE"); value != "" {
+		config["title"] = value
 	} else if strings.TrimSpace(m.Meta.Title) != "" {
 		config["title"] = m.Meta.Title
 	}
 
-	if len(m.Meta.IgnoreLogs) > 0 {
+	if description := strings.TrimSpace(m.Meta.HugoParamsDescription); description != "" {
+		config["params"] = map[string]interface{}{"description": description}
+	}
+
+	if len(m.Meta.HugoIgnoreLogs) > 0 {
+		config["ignoreLogs"] = m.Meta.HugoIgnoreLogs
+	} else if len(m.Meta.IgnoreLogs) > 0 {
 		config["ignoreLogs"] = m.Meta.IgnoreLogs
 	}
-	if strings.TrimSpace(m.Meta.MarkupGoldmarkUnsafe) == "true" {
+	markupUnsafe := strings.TrimSpace(m.Meta.HugoMarkupGoldmarkUnsafe)
+	if markupUnsafe == "" {
+		markupUnsafe = strings.TrimSpace(m.Meta.MarkupGoldmarkUnsafe)
+	}
+	if markupUnsafe == "true" {
 		config["markup"] = map[string]interface{}{
 			"goldmark": map[string]interface{}{
 				"renderer": map[string]interface{}{
@@ -316,6 +332,266 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 	}
 
 	return nil
+}
+
+func parseBoolString(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func hugoConfigValue(metaValue string, lookup map[string]compose.Var, key string) string {
+	if trimmed := strings.TrimSpace(metaValue); trimmed != "" {
+		return trimmed
+	}
+	if v, ok := lookup[key]; ok {
+		return strings.TrimSpace(v.DefaultString())
+	}
+	return ""
+}
+
+func parseHugoLanguages(raw string) (map[string]interface{}, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	var languages map[string]interface{}
+	if err := yaml.Unmarshal([]byte(trimmed), &languages); err != nil {
+		return nil, err
+	}
+	if len(languages) == 0 {
+		return nil, fmt.Errorf("languages map is empty")
+	}
+
+	return languages, nil
+}
+
+func loadDocsI18n() (map[string]map[string]string, error) {
+	docsI18nOnce.Do(func() {
+		docsI18n = make(map[string]map[string]string)
+		for _, language := range []string{"en", "de"} {
+			path := "docs/i18n/" + language + ".yaml"
+			data, err := fs.ReadFile(docsFS, path)
+			if err != nil {
+				docsI18nErr = fmt.Errorf("reading %s: %w", path, err)
+				return
+			}
+
+			translations := make(map[string]string)
+			if err := yaml.Unmarshal(data, &translations); err != nil {
+				docsI18nErr = fmt.Errorf("parsing %s: %w", path, err)
+				return
+			}
+			docsI18n[language] = translations
+		}
+	})
+
+	return docsI18n, docsI18nErr
+}
+
+func localizedString(language, key, fallback string) string {
+	translations, err := loadDocsI18n()
+	if err != nil {
+		return fallback
+	}
+
+	for _, candidate := range translationCandidates(language) {
+		if languageTranslations, ok := translations[candidate]; ok {
+			if value := strings.TrimSpace(languageTranslations[key]); value != "" {
+				return value
+			}
+		}
+	}
+
+	return fallback
+}
+
+func translationCandidates(language string) []string {
+	trimmed := strings.TrimSpace(strings.ToLower(language))
+	if trimmed == "" {
+		return []string{"en"}
+	}
+
+	candidates := []string{trimmed}
+	if strings.Contains(trimmed, "-") {
+		base := strings.SplitN(trimmed, "-", 2)[0]
+		if base != trimmed {
+			candidates = append(candidates, base)
+		}
+	}
+	if trimmed != "en" {
+		candidates = append(candidates, "en")
+	}
+	return candidates
+}
+
+func localizedMenuMain(language, repoURL string, includeLanguageSwitch bool) []map[string]interface{} {
+	mainMenu := []map[string]interface{}{
+		{
+			"name":   localizedString(language, "search", "Search"),
+			"weight": 100,
+			"params": map[string]string{"type": "search"},
+		},
+		{
+			"name":   localizedString(language, "theme", "Theme"),
+			"weight": 110,
+			"params": map[string]string{"type": "theme-toggle"},
+		},
+	}
+
+	if includeLanguageSwitch {
+		mainMenu = append(mainMenu, map[string]interface{}{
+			"name":   localizedString(language, "language", "Language"),
+			"weight": 115,
+			"params": map[string]string{"type": "language-switch"},
+		})
+	}
+
+	if repoURL != "" {
+		mainMenu = append(mainMenu, map[string]interface{}{
+			"name":   localizedString(language, "github", "GitHub"),
+			"url":    repoURL,
+			"weight": 120,
+			"params": map[string]string{"icon": "github"},
+		})
+	}
+
+	return mainMenu
+}
+
+func localizedLanguagesConfig(languages map[string]interface{}, repoURL string, includeLanguageSwitch bool) map[string]interface{} {
+	localized := make(map[string]interface{}, len(languages))
+	for language, rawConfig := range languages {
+		entry, ok := rawConfig.(map[string]interface{})
+		if !ok {
+			localized[language] = rawConfig
+			continue
+		}
+
+		clone := make(map[string]interface{}, len(entry)+1)
+		for key, value := range entry {
+			clone[key] = value
+		}
+		clone["menu"] = map[string]interface{}{
+			"main": localizedMenuMain(language, repoURL, includeLanguageSwitch),
+		}
+		localized[language] = clone
+	}
+	return localized
+}
+
+func buildVarLookup(m *compose.Project) map[string]compose.Var {
+	lookup := make(map[string]compose.Var)
+	for _, v := range m.AllVars() {
+		lookup[v.Key] = v
+	}
+	return lookup
+}
+
+func generatedPageLanguages(m *compose.Project) (string, []string, error) {
+	lookup := buildVarLookup(m)
+	defaultLanguage := hugoConfigValue(m.Meta.HugoDefaultLanguage, lookup, "HUGO_DEFAULT_CONTENT_LANGUAGE")
+	defaultLanguage = strings.TrimSpace(defaultLanguage)
+	if defaultLanguage == "" {
+		defaultLanguage = "en"
+	}
+
+	rawLanguages := hugoConfigValue(m.Meta.HugoLanguages, lookup, "HUGO_LANGUAGES")
+	if strings.TrimSpace(rawLanguages) == "" {
+		return defaultLanguage, nil, nil
+	}
+
+	languages, err := parseHugoLanguages(rawLanguages)
+	if err != nil {
+		return "", nil, fmt.Errorf("parsing HUGO_LANGUAGES for generated pages: %w", err)
+	}
+
+	additionalLanguages := make([]string, 0, len(languages))
+	for language := range languages {
+		language = strings.TrimSpace(language)
+		if language == "" || language == defaultLanguage {
+			continue
+		}
+		additionalLanguages = append(additionalLanguages, language)
+	}
+	sort.Strings(additionalLanguages)
+
+	return defaultLanguage, additionalLanguages, nil
+}
+
+func generatedPageString(language, key string) string {
+	switch language {
+	case "de":
+		switch key {
+		case "setsTitle":
+			return localizedString(language, "sets", "Sets")
+		case "setsDescription":
+			return localizedString(language, "generatedSetsDescription", "Automatisch generierte Referenz der Konfigurations-Sets aus compose.yml.")
+		case "servicesTitle":
+			return localizedString(language, "services", "Dienste")
+		case "servicesDescription":
+			return localizedString(language, "generatedServicesDescription", "Automatisch generierte Dienstreferenz aus compose.yml.")
+		case "setDescriptionFallback":
+			return localizedString(language, "setConfiguration", "Set-Konfiguration")
+		case "setNoVariables":
+			return localizedString(language, "setNoVariables", "Dieses Set definiert keine Variablen.")
+		case "required":
+			return localizedString(language, "required", "Erforderlich")
+		case "defaultHidden":
+			return localizedString(language, "defaultHidden", "Standardwert verborgen")
+		case "example":
+			return localizedString(language, "example", "Beispiel")
+		case "secret":
+			return localizedString(language, "secret", "Geheim")
+		case "readonly":
+			return localizedString(language, "readonly", "Schreibgeschuetzt")
+		case "image":
+			return localizedString(language, "image", "Image")
+		case "platform":
+			return localizedString(language, "platform", "Plattform")
+		case "command":
+			return localizedString(language, "command", "Befehl")
+		}
+	default:
+		switch key {
+		case "setsTitle":
+			return localizedString(language, "sets", "Sets")
+		case "setsDescription":
+			return localizedString(language, "generatedSetsDescription", "Auto-generated configuration set reference from compose.yml.")
+		case "servicesTitle":
+			return localizedString(language, "services", "Services")
+		case "servicesDescription":
+			return localizedString(language, "generatedServicesDescription", "Auto-generated service reference from compose.yml.")
+		case "setDescriptionFallback":
+			return localizedString(language, "setConfiguration", "Set configuration")
+		case "setNoVariables":
+			return localizedString(language, "setNoVariables", "This set does not define variables.")
+		case "required":
+			return localizedString(language, "required", "Required")
+		case "defaultHidden":
+			return localizedString(language, "defaultHidden", "Default hidden")
+		case "example":
+			return localizedString(language, "example", "Example")
+		case "secret":
+			return localizedString(language, "secret", "secret")
+		case "readonly":
+			return localizedString(language, "readonly", "readonly")
+		case "image":
+			return localizedString(language, "image", "Image")
+		case "platform":
+			return localizedString(language, "platform", "Platform")
+		case "command":
+			return localizedString(language, "command", "Command")
+		}
+	}
+
+	return ""
 }
 
 func detectRepositoryURL(dir string) string {
@@ -370,16 +646,27 @@ func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error)
 		return "", fmt.Errorf("creating temporary Hugo content directory: %w", err)
 	}
 
+	defaultLanguage, additionalLanguages, err := generatedPageLanguages(m)
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", err
+	}
+
 	sourceContentDir := filepath.Join(siteRoot, "content")
 	if err := copyDirIfExists(sourceContentDir, tmpDir); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
-	readmeHome := filepath.Join(siteRoot, "README.md")
-	if err := copyFileIfMissing(readmeHome, filepath.Join(tmpDir, "_index.md")); err != nil {
+	if err := copyLocalizedReadmeIfMissing(siteRoot, filepath.Join(tmpDir, "_index.md"), defaultLanguage); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", err
+	}
+	for _, language := range additionalLanguages {
+		if err := copyLocalizedReadmeIfMissing(siteRoot, filepath.Join(tmpDir, "_index."+language+".md"), language); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", err
+		}
 	}
 
 	setsDir := filepath.Join(tmpDir, "sets")
@@ -392,17 +679,36 @@ func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error)
 		os.RemoveAll(tmpDir)
 		return "", err
 	}
+	for _, language := range additionalLanguages {
+		if err := writeFileIfMissing(filepath.Join(tmpDir, "_index."+language+".md"), generateHomeMarkdown(m)); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", err
+		}
+	}
 
-	if err := writeFileIfMissing(filepath.Join(setsDir, "_index.md"), generateSetsIndexMarkdown(m)); err != nil {
+	if err := writeFileIfMissing(filepath.Join(setsDir, "_index.md"), generateSetsIndexMarkdown(m, defaultLanguage)); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", err
+	}
+	for _, language := range additionalLanguages {
+		if err := writeFileIfMissing(filepath.Join(setsDir, "_index."+language+".md"), generateSetsIndexMarkdown(m, language)); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", err
+		}
 	}
 
 	for _, set := range m.OrderedSets() {
 		pagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+".md")
-		if err := writeFileIfMissing(pagePath, generateSetMarkdown(m, set)); err != nil {
+		if err := writeFileIfMissing(pagePath, generateSetMarkdown(m, set, defaultLanguage)); err != nil {
 			os.RemoveAll(tmpDir)
 			return "", err
+		}
+		for _, language := range additionalLanguages {
+			localizedPagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+"."+language+".md")
+			if err := writeFileIfMissing(localizedPagePath, generateSetMarkdown(m, set, language)); err != nil {
+				os.RemoveAll(tmpDir)
+				return "", err
+			}
 		}
 	}
 
@@ -412,9 +718,15 @@ func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error)
 			os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("creating generated services directory: %w", err)
 		}
-		if err := writeFileIfMissing(filepath.Join(servicesDir, "_index.md"), generateServicesIndexMarkdown(m)); err != nil {
+		if err := writeFileIfMissing(filepath.Join(servicesDir, "_index.md"), generateServicesIndexMarkdown(m, defaultLanguage)); err != nil {
 			os.RemoveAll(tmpDir)
 			return "", err
+		}
+		for _, language := range additionalLanguages {
+			if err := writeFileIfMissing(filepath.Join(servicesDir, "_index."+language+".md"), generateServicesIndexMarkdown(m, language)); err != nil {
+				os.RemoveAll(tmpDir)
+				return "", err
+			}
 		}
 	}
 
@@ -444,6 +756,25 @@ func copyFileIfMissing(src, dst string) error {
 	}
 
 	return copyFileIfExists(src, dst)
+}
+
+func copyLocalizedReadmeIfMissing(siteRoot, dst, language string) error {
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking destination file %s: %w", dst, err)
+	}
+
+	if language != "" {
+		localizedReadme := filepath.Join(siteRoot, "README."+language+".md")
+		if _, err := os.Stat(localizedReadme); err == nil {
+			return copyFile(localizedReadme, dst)
+		} else if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("checking localized README %s: %w", localizedReadme, err)
+		}
+	}
+
+	return copyFileIfExists(filepath.Join(siteRoot, "README.md"), dst)
 }
 
 func copyDirIfExists(src, dst string) error {
@@ -545,18 +876,19 @@ func generateHomeMarkdown(m *compose.Project) string {
 	return body.String()
 }
 
-func generateSetsIndexMarkdown(m *compose.Project) string {
+func generateSetsIndexMarkdown(m *compose.Project, language string) string {
 	var body strings.Builder
+	title := generatedPageString(language, "setsTitle")
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       "Sets",
-		"description": "Auto-generated configuration set reference from compose.yaml.",
+		"title":       title,
+		"description": generatedPageString(language, "setsDescription"),
 		"weight":      10,
 		"sidebar": map[string]interface{}{
 			"hide": true,
 		},
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
-				"name":   "Sets",
+				"name":   title,
 				"weight": 10,
 			},
 		},
@@ -564,37 +896,38 @@ func generateSetsIndexMarkdown(m *compose.Project) string {
 	body.WriteString(renderCardsOpen(2))
 	for _, set := range m.OrderedSets() {
 		services := servicesForSet(m, set.Key)
-		body.WriteString(renderSetOverviewCard(set, services))
+		body.WriteString(renderSetOverviewCard(set, services, language))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
 }
 
-func generateServicesIndexMarkdown(m *compose.Project) string {
+func generateServicesIndexMarkdown(m *compose.Project, language string) string {
 	var body strings.Builder
+	title := generatedPageString(language, "servicesTitle")
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       "Services",
-		"description": "Auto-generated service reference from compose.yaml.",
+		"title":       title,
+		"description": generatedPageString(language, "servicesDescription"),
 		"weight":      5,
 		"sidebar": map[string]interface{}{
 			"hide": true,
 		},
 		"menu": map[string]interface{}{
 			"main": map[string]interface{}{
-				"name":   "Services",
+				"name":   title,
 				"weight": 5,
 			},
 		},
 	}))
 	body.WriteString(renderCardsOpen(2))
 	for _, service := range m.Services {
-		body.WriteString(renderServiceCard(m, service))
+		body.WriteString(renderServiceCard(service, language))
 	}
 	body.WriteString(renderCardsClose())
 	return body.String()
 }
 
-func generateSetMarkdown(m *compose.Project, set compose.Set) string {
+func generateSetMarkdown(m *compose.Project, set compose.Set, language string) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
 		"title":       set.Key,
@@ -607,20 +940,20 @@ func generateSetMarkdown(m *compose.Project, set compose.Set) string {
 	// Add set card at the top
 	services := servicesForSet(m, set.Key)
 	body.WriteString(renderCardsOpen(1))
-	body.WriteString(renderSetCard(set, services))
+	body.WriteString(renderSetCard(set, services, language))
 	body.WriteString(renderCardsClose())
 	body.WriteString("\n")
 
 	if len(set.Vars) == 0 {
-		body.WriteString("This set does not define variables.\n")
+		body.WriteString(generatedPageString(language, "setNoVariables") + "\n")
 		return body.String()
 	}
 	for _, variable := range set.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		tag, tagColor, tagBorder := variableCardTag(variable)
+		tag, tagColor, tagBorder := variableCardTag(variable, language)
 		varClass := variableCardClass(variable)
-		body.WriteString(renderCardWithTag(variable.Key, "", "env", variableCardSubtitle(variable), variableCardHTML(variable), "hx:py-4 hx:px-4", tag, tagColor, tagBorder, varClass))
+		body.WriteString(renderCardWithTag(variable.Key, "", "env", variableCardSubtitle(variable, language), variableCardHTML(variable), "hx:py-4 hx:px-4", tag, tagColor, tagBorder, varClass))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
@@ -628,7 +961,7 @@ func generateSetMarkdown(m *compose.Project, set compose.Set) string {
 	return body.String()
 }
 
-func renderServiceCard(m *compose.Project, service compose.Service) string {
+func renderServiceCard(service compose.Service, language string) string {
 	var sb strings.Builder
 	titleClass := ""
 	if len(service.Sets) > 0 {
@@ -648,18 +981,18 @@ func renderServiceCard(m *compose.Project, service compose.Service) string {
 		imageValue := strings.TrimSpace(service.Image)
 		imageLink := imageLink(imageValue)
 		if imageLink != "" {
-			sb.WriteString(fmt.Sprintf(" subtitle2=`**Image:** [%s](%s)`", escapeShortcodeRawValue(imageValue), escapeShortcodeRawValue(imageLink)))
+			sb.WriteString(fmt.Sprintf(" subtitle2=`**%s:** [%s](%s)`", escapeShortcodeRawValue(generatedPageString(language, "image")), escapeShortcodeRawValue(imageValue), escapeShortcodeRawValue(imageLink)))
 		} else {
-			sb.WriteString(fmt.Sprintf(" subtitle2=`**Image:** %s`", escapeShortcodeRawValue(imageValue)))
+			sb.WriteString(fmt.Sprintf(" subtitle2=`**%s:** %s`", escapeShortcodeRawValue(generatedPageString(language, "image")), escapeShortcodeRawValue(imageValue)))
 		}
 	}
 
 	if platform := strings.TrimSpace(service.Platform); platform != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle3=`**Platform:** %s`", escapeShortcodeRawValue(platform)))
+		sb.WriteString(fmt.Sprintf(" subtitle3=`**%s:** %s`", escapeShortcodeRawValue(generatedPageString(language, "platform")), escapeShortcodeRawValue(platform)))
 	}
 
 	if len(service.Command) > 0 {
-		indentedCommand := "**Command:**\n\n    " + wrapCommandArgs(service.Command, 60, "    ")
+		indentedCommand := "**" + generatedPageString(language, "command") + ":**\n\n    " + wrapCommandArgs(service.Command, 60, "    ")
 		sb.WriteString(fmt.Sprintf(" subtitle4=`%s`", escapeShortcodeRawValue(indentedCommand)))
 	}
 
@@ -835,7 +1168,7 @@ func escapeShortcodeRawValue(value string) string {
 	return strings.ReplaceAll(value, "`", "'")
 }
 
-func renderSetCard(set compose.Set, services []string) string {
+func renderSetCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
 	titleClass := "hx:text-4xl md:hx:text-5xl hx:tracking-tight"
 	if len(services) > 0 {
@@ -878,7 +1211,7 @@ func renderSetCard(set compose.Set, services []string) string {
 	return sb.String()
 }
 
-func renderSetOverviewCard(set compose.Set, services []string) string {
+func renderSetOverviewCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\"",
 		escapeShortcodeValue(set.Key),
@@ -887,7 +1220,7 @@ func renderSetOverviewCard(set compose.Set, services []string) string {
 		escapeShortcodeValue("hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0"),
 	))
 
-	description := strings.TrimSpace(defaultString(set.Description, "Set configuration"))
+	description := strings.TrimSpace(defaultString(set.Description, generatedPageString(language, "setDescriptionFallback")))
 	if description != "" {
 		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
 	}
@@ -991,12 +1324,12 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
-func variableCardTag(variable compose.Var) (string, string, string) {
+func variableCardTag(variable compose.Var, language string) (string, string, string) {
 	if variable.IsSecret() {
-		return "secret", "orange", "false"
+		return generatedPageString(language, "secret"), "orange", "false"
 	}
 	if variable.IsReadonly() {
-		return "readonly", "yellow", "false"
+		return generatedPageString(language, "readonly"), "yellow", "false"
 	}
 	return "", "", ""
 }
@@ -1012,7 +1345,7 @@ func variableCardClass(variable compose.Var) string {
 	return strings.Join(classes, " ")
 }
 
-func variableCardSubtitle(variable compose.Var) string {
+func variableCardSubtitle(variable compose.Var, language string) string {
 	parts := make([]string, 0, 5)
 	if strings.TrimSpace(variable.Description) != "" {
 		parts = append(parts, strings.TrimSpace(variable.Description))
@@ -1020,7 +1353,7 @@ func variableCardSubtitle(variable compose.Var) string {
 
 	meta := make([]string, 0, 2)
 	if variable.IsRequired() {
-		meta = append(meta, "Required")
+		meta = append(meta, generatedPageString(language, "required"))
 	}
 	if len(meta) > 0 {
 		parts = append(parts, strings.Join(meta, " · "))
@@ -1029,12 +1362,12 @@ func variableCardSubtitle(variable compose.Var) string {
 	defaultValue := strings.TrimSpace(variable.DefaultString())
 	if defaultValue != "" {
 		if variable.IsSecret() {
-			parts = append(parts, "Default hidden")
+			parts = append(parts, generatedPageString(language, "defaultHidden"))
 		}
 	}
 
 	if strings.TrimSpace(variable.Example) != "" {
-		parts = append(parts, "Example: `"+strings.TrimSpace(variable.Example)+"`")
+		parts = append(parts, generatedPageString(language, "example")+": `"+strings.TrimSpace(variable.Example)+"`")
 	}
 	if len(parts) == 0 {
 		if defaultValue != "" || variable.IsSecret() {

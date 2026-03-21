@@ -52,7 +52,13 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 
 	m := &compose.Project{
-		Meta: compose.Meta{Title: "Example", Description: "Example description", Version: "v1"},
+		Meta: compose.Meta{
+			Title:               "Example",
+			Description:         "Example description",
+			Version:             "v1",
+			HugoDefaultLanguage: "en",
+			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
+		},
 		Services: []compose.Service{{
 			Name:     "web",
 			Image:    "caddy:2.10",
@@ -65,7 +71,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 				Description: "Shared settings for runtime services.",
 				Link:        "[Common Docs]: https://example.org/common",
 				Vars: []compose.Var{
-					{Key: "APP_ENV", Default: "production", Example: "staging"},
+					{Key: "APP_ENV", Default: "production", Required: "true", Example: "staging"},
 					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
 				},
 			},
@@ -99,7 +105,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"titleLink=\"/sets/common/\"",
 		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
 		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`<a href=\"https://example.org/common\" class=\"flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-5 w-5\" /><span>Common Docs</span></a>`",
+		"subtitle2=`<a href=\"https://example.org/common\" class=\"inline-flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-4 w-4\" /><span>Common Docs</span></a>`",
 		`tags="web"`,
 		`tagLinks="/services/#web"`,
 		`tagColor="red"`,
@@ -161,7 +167,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"titleClass=\"hx:text-4xl md:hx:text-5xl hx:tracking-tight hx:pr-40 md:hx:pr-56\"",
 		"toc: false",
 		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`<a href=\"https://example.org/common\" class=\"flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-5 w-5\" /><span>Common Docs</span></a>`",
+		"subtitle2=`<a href=\"https://example.org/common\" class=\"inline-flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-4 w-4\" /><span>Common Docs</span></a>`",
 		`tags="web"`,
 		`tagLinks="/services/#web"`,
 		`tagColor="red"`,
@@ -182,6 +188,36 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	if strings.Contains(string(groupContent), "link=\"#app_env\"") {
 		t.Fatalf("expected generated set page variable cards to be non-clickable, got:\n%s", string(groupContent))
+	}
+
+	localizedSetsIndexContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(sets/_index.de.md): %v", err)
+	}
+	localizedSetsChecks := []string{
+		"title: Sets",
+		"description: Automatisch generierte Referenz der Konfigurations-Sets aus compose.yml.",
+		"name: Sets",
+	}
+	for _, check := range localizedSetsChecks {
+		if !strings.Contains(string(localizedSetsIndexContent), check) {
+			t.Fatalf("expected generated localized sets index to contain %q, got:\n%s", check, string(localizedSetsIndexContent))
+		}
+	}
+
+	localizedGroupContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "common.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(sets/common.de.md): %v", err)
+	}
+	localizedGroupChecks := []string{
+		"Erforderlich",
+		"Beispiel: 'staging'",
+		`tag="Schreibgeschuetzt"`,
+	}
+	for _, check := range localizedGroupChecks {
+		if !strings.Contains(string(localizedGroupContent), check) {
+			t.Fatalf("expected generated localized set page to contain %q, got:\n%s", check, string(localizedGroupContent))
+		}
 	}
 
 	servicesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "services", "_index.md"))
@@ -207,6 +243,22 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	for _, check := range servicesChecks {
 		if !strings.Contains(string(servicesIndexContent), check) {
 			t.Fatalf("expected generated services index to contain %q, got:\n%s", check, string(servicesIndexContent))
+		}
+	}
+
+	localizedServicesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "services", "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(services/_index.de.md): %v", err)
+	}
+	localizedServicesChecks := []string{
+		"title: Dienste",
+		"name: Dienste",
+		"subtitle3=`**Plattform:** linux/amd64`",
+		"subtitle4=`**Befehl:**",
+	}
+	for _, check := range localizedServicesChecks {
+		if !strings.Contains(string(localizedServicesIndexContent), check) {
+			t.Fatalf("expected generated localized services index to contain %q, got:\n%s", check, string(localizedServicesIndexContent))
 		}
 	}
 
@@ -311,6 +363,84 @@ func TestPrepareBuildContentDirUsesReadmeAsHome(t *testing.T) {
 	}
 }
 
+func TestPrepareBuildContentDirUsesLocalizedReadmeAsHome(t *testing.T) {
+	siteRoot := t.TempDir()
+	readmeHome := "# README Home\n"
+	localizedReadmeHome := "# README Startseite\n"
+	if err := os.WriteFile(filepath.Join(siteRoot, "README.md"), []byte(readmeHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(siteRoot, "README.de.md"), []byte(localizedReadmeHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.de.md): %v", err)
+	}
+
+	m := &compose.Project{
+		Meta: compose.Meta{
+			Title:               "Example",
+			HugoDefaultLanguage: "en",
+			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
+		},
+	}
+
+	contentDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+
+	homeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(_index.md): %v", err)
+	}
+	if string(homeContent) != readmeHome {
+		t.Fatalf("expected README.md to be used as default home page, got:\n%s", string(homeContent))
+	}
+
+	localizedHomeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(_index.de.md): %v", err)
+	}
+	if string(localizedHomeContent) != localizedReadmeHome {
+		t.Fatalf("expected README.de.md to be used as german home page, got:\n%s", string(localizedHomeContent))
+	}
+
+	if err := os.RemoveAll(contentDir); err != nil {
+		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
+func TestPrepareBuildContentDirFallsBackToDefaultReadmeForLocalizedHome(t *testing.T) {
+	siteRoot := t.TempDir()
+	readmeHome := "# README Home\n"
+	if err := os.WriteFile(filepath.Join(siteRoot, "README.md"), []byte(readmeHome), 0o644); err != nil {
+		t.Fatalf("WriteFile(README.md): %v", err)
+	}
+
+	m := &compose.Project{
+		Meta: compose.Meta{
+			Title:               "Example",
+			HugoDefaultLanguage: "en",
+			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
+		},
+	}
+
+	contentDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+
+	localizedHomeContent, err := os.ReadFile(filepath.Join(contentDir, "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(_index.de.md): %v", err)
+	}
+	if string(localizedHomeContent) != readmeHome {
+		t.Fatalf("expected README.md fallback for german home page, got:\n%s", string(localizedHomeContent))
+	}
+
+	if err := os.RemoveAll(contentDir); err != nil {
+		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
 func TestUsesGeneratedHugoSite(t *testing.T) {
 	tests := []struct {
 		subcommand string
@@ -333,8 +463,13 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	siteDir := t.TempDir()
 	m := &compose.Project{
 		Meta: compose.Meta{
-			Title:      "Example",
-			IgnoreLogs: []string{"warning-goldmark-raw-html"},
+			Title:                    "Legacy Example",
+			IgnoreLogs:               []string{"legacy-ignore"},
+			HugoTitle:                "Hugo Example",
+			HugoParamsDescription:    "Configured via HUGO_PARAMS_DESCRIPTION",
+			HugoIgnoreLogs:           []string{"warning-goldmark-raw-html"},
+			MarkupGoldmarkUnsafe:     "false",
+			HugoMarkupGoldmarkUnsafe: "true",
 		},
 	}
 
@@ -355,6 +490,28 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	ignoreLogs, ok := got["ignoreLogs"].([]interface{})
 	if !ok || len(ignoreLogs) != 1 || ignoreLogs[0] != "warning-goldmark-raw-html" {
 		t.Fatalf("expected ignoreLogs [warning-goldmark-raw-html], got: %#v", got["ignoreLogs"])
+	}
+
+	if got["title"] != "Hugo Example" {
+		t.Fatalf("expected title Hugo Example, got: %#v", got["title"])
+	}
+
+	paramsConfig, ok := got["params"].(map[string]interface{})
+	if !ok || paramsConfig["description"] != "Configured via HUGO_PARAMS_DESCRIPTION" {
+		t.Fatalf("expected params.description from HUGO_PARAMS_DESCRIPTION, got: %#v", got["params"])
+	}
+
+	markup, ok := got["markup"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected markup map, got: %#v", got["markup"])
+	}
+	goldmark, ok := markup["goldmark"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected markup.goldmark map, got: %#v", markup["goldmark"])
+	}
+	renderer, ok := goldmark["renderer"].(map[string]interface{})
+	if !ok || renderer["unsafe"] != true {
+		t.Fatalf("expected markup.goldmark.renderer.unsafe=true, got: %#v", goldmark["renderer"])
 	}
 
 	module, ok := got["module"].(map[string]interface{})
@@ -436,5 +593,103 @@ func TestNormalizeRepositoryURL(t *testing.T) {
 				t.Fatalf("normalizeRepositoryURL(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestIncludesMultilanguage(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &compose.Project{
+		Meta: compose.Meta{
+			Title:               "Example",
+			HugoDefaultLanguage: "en",
+			HugoDefaultInSubdir: "true",
+			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
+		},
+	}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	if got["defaultContentLanguage"] != "en" {
+		t.Fatalf("expected defaultContentLanguage en, got: %#v", got["defaultContentLanguage"])
+	}
+	if got["defaultContentLanguageInSubdir"] != true {
+		t.Fatalf("expected defaultContentLanguageInSubdir true, got: %#v", got["defaultContentLanguageInSubdir"])
+	}
+
+	languages, ok := got["languages"].(map[string]interface{})
+	if !ok || len(languages) != 2 {
+		t.Fatalf("expected languages map with 2 entries, got: %#v", got["languages"])
+	}
+	if _, ok := languages["en"]; !ok {
+		t.Fatalf("expected languages.en to exist, got: %#v", languages)
+	}
+	if _, ok := languages["de"]; !ok {
+		t.Fatalf("expected languages.de to exist, got: %#v", languages)
+	}
+
+	menu, ok := got["menu"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
+	}
+	mainMenu, ok := menu["main"].([]interface{})
+	if !ok || len(mainMenu) < 3 {
+		t.Fatalf("expected menu.main with language switch, got: %#v", menu["main"])
+	}
+
+	foundLanguageSwitch := false
+	for _, item := range mainMenu {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		params, ok := entry["params"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if params["type"] == "language-switch" {
+			foundLanguageSwitch = true
+			break
+		}
+	}
+	if !foundLanguageSwitch {
+		t.Fatalf("expected language-switch menu item in menu.main, got: %#v", menu["main"])
+	}
+
+	deConfig, ok := languages["de"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected languages.de to be map, got: %#v", languages["de"])
+	}
+	deMenu, ok := deConfig["menu"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected languages.de.menu map, got: %#v", deConfig["menu"])
+	}
+	deMainMenu, ok := deMenu["main"].([]interface{})
+	if !ok || len(deMainMenu) < 3 {
+		t.Fatalf("expected localized languages.de.menu.main, got: %#v", deMenu["main"])
+	}
+
+	deFirstMenuItem, ok := deMainMenu[0].(map[string]interface{})
+	if !ok || deFirstMenuItem["name"] != "Suche" {
+		t.Fatalf("expected first german menu item to be Suche, got: %#v", deMainMenu[0])
+	}
+	deSecondMenuItem, ok := deMainMenu[1].(map[string]interface{})
+	if !ok || deSecondMenuItem["name"] != "Design" {
+		t.Fatalf("expected second german menu item to be Design, got: %#v", deMainMenu[1])
+	}
+	deThirdMenuItem, ok := deMainMenu[2].(map[string]interface{})
+	if !ok || deThirdMenuItem["name"] != "Sprache" {
+		t.Fatalf("expected third german menu item to be Sprache, got: %#v", deMainMenu[2])
 	}
 }

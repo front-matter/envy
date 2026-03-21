@@ -30,14 +30,22 @@ type Project struct {
 
 // Meta holds envy-specific metadata.
 type Meta struct {
-	Title                string   `yaml:"title,omitempty"`
-	Docs                 string   `yaml:"docs,omitempty"`
-	Author               string   `yaml:"author,omitempty"`
-	LanguageCode         string   `yaml:"languageCode,omitempty"`
-	Description          string   `yaml:"description,omitempty"`
-	Version              string   `yaml:"version,omitempty"`
-	IgnoreLogs           []string `yaml:"ignoreLogs,omitempty"`
-	MarkupGoldmarkUnsafe string   `yaml:"markupGoldmarkUnsafe,omitempty"`
+	Title                    string   `yaml:"title,omitempty"`
+	Docs                     string   `yaml:"docs,omitempty"`
+	Author                   string   `yaml:"author,omitempty"`
+	LanguageCode             string   `yaml:"languageCode,omitempty"`
+	Description              string   `yaml:"description,omitempty"`
+	Version                  string   `yaml:"version,omitempty"`
+	IgnoreLogs               []string `yaml:"ignoreLogs,omitempty"`
+	MarkupGoldmarkUnsafe     string   `yaml:"markupGoldmarkUnsafe,omitempty"`
+	HugoTitle                string   `yaml:"HUGO_TITLE,omitempty"`
+	HugoParamsDescription    string   `yaml:"HUGO_PARAMS_DESCRIPTION,omitempty"`
+	HugoIgnoreLogs           []string `yaml:"HUGO_IGNORE_LOGS,omitempty"`
+	HugoMarkupGoldmarkUnsafe string   `yaml:"HUGO_MARKUP_GOLDMARK_UNSAFE,omitempty"`
+	HugoLanguageCode         string   `yaml:"HUGO_LANGUAGE_CODE,omitempty"`
+	HugoDefaultLanguage      string   `yaml:"HUGO_DEFAULT_CONTENT_LANGUAGE,omitempty"`
+	HugoDefaultInSubdir      string   `yaml:"HUGO_DEFAULT_CONTENT_LANGUAGE_IN_SUBDIR,omitempty"`
+	HugoLanguages            string   `yaml:"HUGO_LANGUAGES,omitempty"`
 }
 
 // Services describes the ordered list of runtime services.
