@@ -16,7 +16,8 @@ before:
     - go generate ./...
 
 builds:
-  - env:
+  - id: envy
+    env:
       - CGO_ENABLED=0
     ldflags:
       - -s -w -X github.com/front-matter/envy/cmd.Version={{ .Version }}
@@ -24,6 +25,9 @@ builds:
       - linux
       - windows
       - darwin
+    goarch:
+      - amd64
+      - arm64
 
 archives:
   - formats: [tar.gz]
@@ -46,6 +50,28 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+nfpms:
+  - id: envy-packages
+    ids:
+      - envy
+    package_name: envy
+    file_name_template: "{{ .ConventionalFileName }}"
+    homepage: https://envy.front-matter.de
+    description: CLI to manage Docker Compose manifests, .env generation, linting, validation, and docs.
+    maintainer: Front Matter <hello@front-matter.de>
+    vendor: Front Matter
+    license: MIT
+    section: utils
+    priority: optional
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/envy/copyright
 
 release:
   footer: >-
