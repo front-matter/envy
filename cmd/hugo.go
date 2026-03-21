@@ -274,6 +274,15 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string) error {
 	if len(m.Meta.IgnoreLogs) > 0 {
 		config["ignoreLogs"] = m.Meta.IgnoreLogs
 	}
+	if strings.TrimSpace(m.Meta.MarkupGoldmarkUnsafe) == "true" {
+		config["markup"] = map[string]interface{}{
+			"goldmark": map[string]interface{}{
+				"renderer": map[string]interface{}{
+					"unsafe": true,
+				},
+			},
+		}
+	}
 
 	content, err := yaml.Marshal(config)
 	if err != nil {
@@ -776,10 +785,11 @@ func renderSetCard(set compose.Set, services []string) string {
 		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description))))
 	}
 
-	// Add documentation link as subtitle2
+	// Add documentation link as subtitle2.
 	if strings.TrimSpace(set.Link) != "" {
-		link := strings.TrimSpace(set.Link)
-		sb.WriteString(fmt.Sprintf(" subtitle2=`[%s](%s)`", escapeShortcodeRawValue(link), escapeShortcodeRawValue(link)))
+		linkLabel, linkTarget := normalizeSetDocLink(set.Link)
+		sb.WriteString(fmt.Sprintf(` subtitle2=`+"`"+`<a href="%s" class="inline-flex items-center gap-2"><img src="/images/readme.svg" class="h-4 w-4" /><span>%s</span></a>`+"`",
+			escapeShortcodeRawValue(linkTarget), escapeShortcodeRawValue(linkLabel)))
 	}
 
 	// Add services tags in the card tag area
@@ -815,8 +825,9 @@ func renderSetOverviewCard(set compose.Set, services []string) string {
 	}
 
 	if strings.TrimSpace(set.Link) != "" {
-		link := strings.TrimSpace(set.Link)
-		sb.WriteString(fmt.Sprintf(" subtitle2=`[%s](%s)`", escapeShortcodeRawValue(link), escapeShortcodeRawValue(link)))
+		linkLabel, linkTarget := normalizeSetDocLink(set.Link)
+		sb.WriteString(fmt.Sprintf(` subtitle2=`+"`"+`<a href="%s" class="inline-flex items-center gap-2"><img src="/images/readme.svg" class="h-4 w-4" /><span>%s</span></a>`+"`",
+			escapeShortcodeRawValue(linkTarget), escapeShortcodeRawValue(linkLabel)))
 	}
 
 	if len(services) > 0 {
@@ -851,6 +862,25 @@ func renderLinkedHextraBadgeHTML(label, href, color string, border bool) string 
 		badgeClass,
 		html.EscapeString(label),
 	)
+}
+
+func normalizeSetDocLink(raw string) (label string, target string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+
+	if strings.HasPrefix(raw, "[") {
+		if end := strings.Index(raw, "]:"); end > 1 {
+			text := strings.TrimSpace(raw[1:end])
+			url := strings.TrimSpace(raw[end+2:])
+			if text != "" && url != "" {
+				return text, url
+			}
+		}
+	}
+
+	return raw, raw
 }
 
 func renderHextraBadgeHTML(label, color string) string {

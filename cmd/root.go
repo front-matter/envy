@@ -21,7 +21,6 @@ produces documentation that can be deployed as a static website. Example usage:
 envy validate
 envy lint
 envy import
-envy export
 envy secrets
 envy generate --no-secrets > .env.example
 envy diff .env.prod

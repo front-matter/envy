@@ -14,8 +14,10 @@ import (
 
 var dockerImagePattern = regexp.MustCompile(`^([A-Za-z0-9.-]+(?::[0-9]+)?/)?[a-z0-9]+([._-][a-z0-9]+)*(\/[a-z0-9]+([._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@[A-Za-z][A-Za-z0-9]*:[A-Za-z0-9=_:+.-]+)?$`)
 var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\((https?://[^)\s]+)\)`)
+var markdownReferenceLinkPattern = regexp.MustCompile(`^\[[^\]]+\]:\s*(https?://\S+)$`)
 var plainLinkPattern = regexp.MustCompile(`^https?://\S+$`)
 var prefixedLinkPattern = regexp.MustCompile(`(?i)^link:\s*(https?://\S+)$`)
+var composeInterpolationPattern = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])(.*))?\}$`)
 
 // Project is the top-level structure used by envy. It embeds compose-go's Project
 // as the canonical type and adds envy-specific metadata and functionality.
@@ -28,13 +30,14 @@ type Project struct {
 
 // Meta holds envy-specific metadata.
 type Meta struct {
-	Title        string   `yaml:"title,omitempty"`
-	Docs         string   `yaml:"docs,omitempty"`
-	Author       string   `yaml:"author,omitempty"`
-	LanguageCode string   `yaml:"languageCode,omitempty"`
-	Description  string   `yaml:"description,omitempty"`
-	Version      string   `yaml:"version,omitempty"`
-	IgnoreLogs   []string `yaml:"ignoreLogs,omitempty"`
+	Title                string   `yaml:"title,omitempty"`
+	Docs                 string   `yaml:"docs,omitempty"`
+	Author               string   `yaml:"author,omitempty"`
+	LanguageCode         string   `yaml:"languageCode,omitempty"`
+	Description          string   `yaml:"description,omitempty"`
+	Version              string   `yaml:"version,omitempty"`
+	IgnoreLogs           []string `yaml:"ignoreLogs,omitempty"`
+	MarkupGoldmarkUnsafe string   `yaml:"markupGoldmarkUnsafe,omitempty"`
 }
 
 // Services describes the ordered list of runtime services.
@@ -272,7 +275,7 @@ func (m *Project) UnmarshalYAML(node *yaml.Node) error {
 					return err
 				}
 
-				description, link := parseSetMetadataFromComments(node.Content[i].HeadComment, value.HeadComment)
+				description, link := extractSetMetadataFromComments(node, i)
 				if set.Description == "" {
 					set.Description = description
 				}
@@ -702,7 +705,8 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				if err := value.Decode(&scalar); err != nil {
 					return out, err
 				}
-				out.Vars = append(out.Vars, Var{Key: key, Default: scalar})
+				v := normalizeVarComposeSyntax(Var{Key: key, Default: scalar})
+				out.Vars = append(out.Vars, v)
 				continue
 			}
 
@@ -711,7 +715,7 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				return out, err
 			}
 			v.Key = key
-			out.Vars = append(out.Vars, v)
+			out.Vars = append(out.Vars, normalizeVarComposeSyntax(v))
 		}
 	}
 	return out, nil
@@ -733,6 +737,10 @@ func parseSetMetadataFromComments(comments ...string) (string, string) {
 					link = matches[1]
 					continue
 				}
+				if markdownReferenceLinkPattern.MatchString(clean) {
+					link = clean
+					continue
+				}
 				if matches := prefixedLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
 					link = matches[1]
 					continue
@@ -748,6 +756,30 @@ func parseSetMetadataFromComments(comments ...string) (string, string) {
 	}
 
 	return strings.TrimSpace(strings.Join(descriptionParts, " ")), link
+}
+
+func extractSetMetadataFromComments(root *yaml.Node, keyIndex int) (string, string) {
+	if root == nil || keyIndex < 0 || keyIndex+1 >= len(root.Content) {
+		return "", ""
+	}
+
+	keyNode := root.Content[keyIndex]
+	valueNode := root.Content[keyIndex+1]
+
+	comments := []string{
+		keyNode.HeadComment,
+		keyNode.LineComment,
+		valueNode.HeadComment,
+		valueNode.LineComment,
+	}
+
+	// Comments between mapping entries can be attached to the previous value node.
+	if keyIndex >= 2 {
+		prevValueNode := root.Content[keyIndex-1]
+		comments = append([]string{prevValueNode.FootComment}, comments...)
+	}
+
+	return parseSetMetadataFromComments(comments...)
 }
 
 func decodeServiceEnvironmentSetRefs(node *yaml.Node) ([]string, error) {
@@ -823,7 +855,7 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 			if err := item.Decode(&v); err != nil {
 				return nil, err
 			}
-			vars = append(vars, v)
+			vars = append(vars, normalizeVarComposeSyntax(v))
 		}
 		return vars, nil
 	case yaml.MappingNode:
@@ -835,11 +867,56 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 				return nil, err
 			}
 			v.Key = key
-			vars = append(vars, v)
+			vars = append(vars, normalizeVarComposeSyntax(v))
 		}
 		return vars, nil
 	default:
 		return nil, fmt.Errorf("expected vars sequence or mapping, got YAML kind %d", node.Kind)
+	}
+}
+
+func normalizeVarComposeSyntax(v Var) Var {
+	parsedDefault, parsedRequired, parsedReadonly := parseComposeDefaultSyntax(v.Default)
+	v.Default = parsedDefault
+
+	if strings.TrimSpace(v.Required) == "" {
+		if parsedRequired {
+			v.Required = "true"
+		} else {
+			v.Required = "false"
+		}
+	}
+
+	if strings.TrimSpace(v.Readonly) == "" {
+		if parsedReadonly {
+			v.Readonly = "true"
+		} else {
+			v.Readonly = "false"
+		}
+	}
+
+	return v
+}
+
+func parseComposeDefaultSyntax(value string) (defaultValue string, required bool, readonly bool) {
+	value = strings.TrimSpace(value)
+	matches := composeInterpolationPattern.FindStringSubmatch(value)
+	if len(matches) == 0 {
+		return value, false, true
+	}
+
+	operator := matches[2]
+	rawDefault := matches[3]
+
+	switch operator {
+	case "":
+		return "", true, false
+	case ":-", "-":
+		return rawDefault, false, false
+	case ":?", "?":
+		return rawDefault, true, false
+	default:
+		return value, false, true
 	}
 }
 

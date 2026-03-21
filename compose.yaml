@@ -9,6 +9,7 @@ x-envy:
   languageCode: en-US
   ignoreLogs:
     - warning-goldmark-raw-html
+  markupGoldmarkUnsafe: "true"
 # Shared environment variables for web and worker.
 # [Configure language(s) and locale(s) (i18n and l10n)]: https://inveniordm.docs.cern.ch/operate/customize/i18n-and-l10n/
 x-set-base: &base

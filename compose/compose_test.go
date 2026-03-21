@@ -34,6 +34,53 @@ func TestStringDefaultUnmarshalYAML(t *testing.T) {
 	}
 }
 
+func TestDecodeSetParsesComposeInterpolationSyntax(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-application: &application",
+		"  INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED: ${INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED:-true}",
+		"  INVENIO_RDM_SITE_NAME: ${INVENIO_RDM_SITE_NAME:?required}",
+		"  INVENIO_INSTANCE_PATH: /opt/invenio/var/instance",
+		"  INVENIO_HOSTNAME: ${INVENIO_HOSTNAME}",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["application"]
+	if !ok {
+		t.Fatalf("expected application set")
+	}
+
+	byKey := make(map[string]Var, len(set.Vars))
+	for _, v := range set.Vars {
+		byKey[v.Key] = v
+	}
+
+	login := byKey["INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED"]
+	if login.Default != "true" || login.IsRequired() || login.IsReadonly() {
+		t.Fatalf("unexpected parsed login var: %+v", login)
+	}
+
+	siteName := byKey["INVENIO_RDM_SITE_NAME"]
+	if siteName.Default != "required" || !siteName.IsRequired() || siteName.IsReadonly() {
+		t.Fatalf("unexpected parsed required var: %+v", siteName)
+	}
+
+	hostname := byKey["INVENIO_HOSTNAME"]
+	if hostname.Default != "" || !hostname.IsRequired() || hostname.IsReadonly() {
+		t.Fatalf("unexpected parsed bare interpolation var: %+v", hostname)
+	}
+
+	instancePath := byKey["INVENIO_INSTANCE_PATH"]
+	if instancePath.Default != "/opt/invenio/var/instance" || instancePath.IsRequired() || !instancePath.IsReadonly() {
+		t.Fatalf("unexpected parsed literal var: %+v", instancePath)
+	}
+}
+
 func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 	m := Project{
 		Meta: Meta{
@@ -434,6 +481,65 @@ func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
 	}
 	if set.Link != "https://example.org/docs" {
 		t.Fatalf("expected markdown link extraction, got %q", set.Link)
+	}
+}
+
+func TestManifestLoadSetLinkFromMarkdownReferenceComment(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"# Shared settings",
+		"# [Base Docs]: https://example.org/base",
+		"x-set-base: &base",
+		"  APP_ENV:",
+		"    default: production",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["base"]
+	if !ok {
+		t.Fatalf("expected base set")
+	}
+	if set.Description != "Shared settings" {
+		t.Fatalf("expected set description from comment, got %q", set.Description)
+	}
+	if set.Link != "[Base Docs]: https://example.org/base" {
+		t.Fatalf("expected markdown reference-style link extraction, got %q", set.Link)
+	}
+}
+
+func TestManifestLoadSetDescriptionAndLinkFromInterEntryComments(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  APP_ENV:",
+		"    default: production",
+		"# Worker-only settings",
+		"# link: https://example.org/worker",
+		"x-set-worker: &worker",
+		"  WORKER_CONCURRENCY:",
+		"    default: \"4\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["worker"]
+	if !ok {
+		t.Fatalf("expected worker set")
+	}
+	if set.Description != "Worker-only settings" {
+		t.Fatalf("expected set description from inter-entry comments, got %q", set.Description)
+	}
+	if set.Link != "https://example.org/worker" {
+		t.Fatalf("expected set link from inter-entry comments, got %q", set.Link)
 	}
 }
 

@@ -10,6 +10,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestNormalizeSetDocLink(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantLabel  string
+		wantTarget string
+	}{
+		{
+			name:       "plain url",
+			input:      "https://example.org/common",
+			wantLabel:  "https://example.org/common",
+			wantTarget: "https://example.org/common",
+		},
+		{
+			name:       "markdown reference style",
+			input:      "[Common Docs]: https://example.org/common",
+			wantLabel:  "Common Docs",
+			wantTarget: "https://example.org/common",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			label, target := normalizeSetDocLink(tt.input)
+			if label != tt.wantLabel || target != tt.wantTarget {
+				t.Fatalf("normalizeSetDocLink(%q) = (%q, %q), want (%q, %q)", tt.input, label, target, tt.wantLabel, tt.wantTarget)
+			}
+		})
+	}
+}
+
 func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *testing.T) {
 	siteRoot := t.TempDir()
 	existingContentDir := filepath.Join(siteRoot, "content")
@@ -32,7 +63,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		Sets: map[string]compose.Set{
 			"common": {
 				Description: "Shared settings for runtime services.",
-				Link:        "https://example.org/common",
+				Link:        "[Common Docs]: https://example.org/common",
 				Vars: []compose.Var{
 					{Key: "APP_ENV", Default: "production", Example: "staging"},
 					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
@@ -68,7 +99,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"titleLink=\"/sets/common/\"",
 		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
 		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`[https://example.org/common](https://example.org/common)`",
+		"subtitle2=`<a href=\"https://example.org/common\" class=\"flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-5 w-5\" /><span>Common Docs</span></a>`",
 		`tags="web"`,
 		`tagLinks="/services/#web"`,
 		`tagColor="red"`,
@@ -130,7 +161,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"titleClass=\"hx:text-4xl md:hx:text-5xl hx:tracking-tight hx:pr-40 md:hx:pr-56\"",
 		"toc: false",
 		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`[https://example.org/common](https://example.org/common)`",
+		"subtitle2=`<a href=\"https://example.org/common\" class=\"flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-5 w-5\" /><span>Common Docs</span></a>`",
 		`tags="web"`,
 		`tagLinks="/services/#web"`,
 		`tagColor="red"`,
