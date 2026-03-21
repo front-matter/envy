@@ -16,6 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const hugoModuleVersion = "github.com/gohugoio/hugo@v0.156.0"
+
 var buildCmd = &cobra.Command{
 	Use:                "build [hugo flags]",
 	Short:              "Generate documentation site",
@@ -53,10 +55,8 @@ func init() {
 }
 
 func runHugoCommand(subcommand string, args []string) error {
-	hugoPath, err := exec.LookPath("hugo")
-	if err != nil {
-		return fmt.Errorf("hugo executable not found in PATH: %w", err)
-	}
+	hugoArgs := make([]string, 0, len(args)+3)
+	hugoArgs = append(hugoArgs, subcommand)
 
 	buildSiteDir := ""
 	if usesGeneratedHugoSite(subcommand) {
@@ -81,14 +81,12 @@ func runHugoCommand(subcommand string, args []string) error {
 		return fmt.Errorf("determining working directory: %w", err)
 	}
 
-	allArgs := make([]string, 0, len(args)+3)
-	allArgs = append(allArgs, subcommand)
 	if subcommand == "build" {
-		allArgs = append(allArgs, "--destination", filepath.Join(cwd, "public"))
+		hugoArgs = append(hugoArgs, "--destination", filepath.Join(cwd, "public"))
 	}
-	allArgs = append(allArgs, args...)
+	hugoArgs = append(hugoArgs, args...)
 
-	command := exec.Command(hugoPath, allArgs...)
+	command, commandName := buildHugoExecCommand(hugoArgs)
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
@@ -106,12 +104,22 @@ func runHugoCommand(subcommand string, args []string) error {
 	if err := command.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("hugo %s exited with code %d", subcommand, exitErr.ExitCode())
+			return fmt.Errorf("%s %s exited with code %d", commandName, subcommand, exitErr.ExitCode())
 		}
-		return fmt.Errorf("running hugo %s: %w", subcommand, err)
+		return fmt.Errorf("running %s %s: %w", commandName, subcommand, err)
 	}
 
 	return nil
+}
+
+func buildHugoExecCommand(args []string) (*exec.Cmd, string) {
+	hugoPath, err := exec.LookPath("hugo")
+	if err == nil {
+		return exec.Command(hugoPath, args...), "hugo"
+	}
+
+	goArgs := append([]string{"run", "-mod=mod", hugoModuleVersion}, args...)
+	return exec.Command("go", goArgs...), "go run " + hugoModuleVersion
 }
 
 func usesGeneratedHugoSite(subcommand string) bool {
