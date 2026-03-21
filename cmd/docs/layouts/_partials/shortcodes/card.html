@@ -24,6 +24,7 @@
 {{- $tagHTML := .tagHTML | default "" -}}
 {{- $tags := .tags | default "" -}}
 {{- $tagLinks := .tagLinks | default "" -}}
+{{- $defaultTagSizeClass := "hx:px-3 hx:leading-7 hx:text-sm md:hx:text-base" -}}
 
 {{ $linkClass := "hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900" }}
 {{- with $image -}}
@@ -113,6 +114,7 @@
       "class" $tagClass
       "border" $tagBorder
       "icon" $tagIcon
+      "sizeClass" $defaultTagSizeClass
       )
     -}}
   {{- end -}}
@@ -129,10 +131,10 @@
         {{- $badgeHref := cond (strings.HasPrefix $badgeLink "/") ($badgeLink | relLangURL) $badgeLink -}}
         {{- if $badgeLink -}}
           <a href="{{ $badgeHref }}" title="{{ $t | plainify }}" class="not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline">
-            {{- partial "shortcodes/badge.html" (dict "content" $t "color" $tagColor "border" $tagBorder) -}}
+            {{- partial "shortcodes/badge.html" (dict "content" $t "color" $tagColor "border" $tagBorder "sizeClass" $defaultTagSizeClass) -}}
           </a>
         {{- else -}}
-          {{- partial "shortcodes/badge.html" (dict "content" $t "color" $tagColor "border" $tagBorder) -}}
+          {{- partial "shortcodes/badge.html" (dict "content" $t "color" $tagColor "border" $tagBorder "sizeClass" $defaultTagSizeClass) -}}
         {{- end -}}
       {{- end -}}
     </div>

@@ -543,6 +543,22 @@ func TestManifestLoadSetDescriptionAndLinkFromInterEntryComments(t *testing.T) {
 	}
 }
 
+func TestParseSetMetadataFromCommentsIgnoresSlashSlashLines(t *testing.T) {
+	description, link := parseSetMetadataFromComments(strings.Join([]string{
+		"// This line should be ignored",
+		"# Shared settings",
+		"// link: https://example.org/ignored",
+		"# link: https://example.org/base",
+	}, "\n"))
+
+	if description != "Shared settings" {
+		t.Fatalf("expected description from # comment, got %q", description)
+	}
+	if link != "https://example.org/base" {
+		t.Fatalf("expected link from # comment, got %q", link)
+	}
+}
+
 func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},

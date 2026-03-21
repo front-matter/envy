@@ -735,7 +735,12 @@ func parseSetMetadataFromComments(comments ...string) (string, string) {
 
 	for _, raw := range comments {
 		for _, line := range strings.Split(raw, "\n") {
-			clean := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+
+			clean := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
 			if clean == "" {
 				continue
 			}
