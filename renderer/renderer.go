@@ -1,15 +1,15 @@
-// Package renderer produces documentation from a manifest.
+// Package renderer produces documentation from a compose.
 package renderer
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 // Render dispatches to the correct format renderer.
-func Render(m *manifest.Manifest, format string) (string, error) {
+func Render(m *compose.Project, format string) (string, error) {
 	switch format {
 	case "markdown", "md", "":
 		return renderMarkdown(m), nil
@@ -24,7 +24,7 @@ func Render(m *manifest.Manifest, format string) (string, error) {
 
 // ── Markdown ──────────────────────────────────────────────────────────────────
 
-func renderMarkdown(m *manifest.Manifest) string {
+func renderMarkdown(m *compose.Project) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# %s — Environment Variable Reference\n\n", m.Meta.Title))
@@ -66,7 +66,7 @@ func renderMarkdown(m *manifest.Manifest) string {
 
 // ── RST ───────────────────────────────────────────────────────────────────────
 
-func renderRST(m *manifest.Manifest) string {
+func renderRST(m *compose.Project) string {
 	var sb strings.Builder
 
 	title := fmt.Sprintf("%s Environment Variables", m.Meta.Title)
@@ -100,7 +100,7 @@ func renderRST(m *manifest.Manifest) string {
 
 // ── Table ─────────────────────────────────────────────────────────────────────
 
-func renderTable(m *manifest.Manifest) string {
+func renderTable(m *compose.Project) string {
 	var sb strings.Builder
 	header := fmt.Sprintf("%-60s %-4s %-40s %s", "VARIABLE", "REQ", "DEFAULT", "DESCRIPTION")
 	sb.WriteString(header + "\n")

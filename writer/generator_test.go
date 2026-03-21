@@ -4,15 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "Example"},
-		Sets: map[string]manifest.Set{
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "REQ", Default: "x", Description: "required var", Required: "true"},
 					{Key: "OPT", Default: "y", Description: "optional var", Required: "false"},
 				},
@@ -34,11 +34,11 @@ func TestGenerateMarksRequiredWithoutOptionalMarker(t *testing.T) {
 }
 
 func TestGenerateSkipsReadonlyVars(t *testing.T) {
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "Example"},
-		Sets: map[string]manifest.Set{
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "EDITABLE_VAR", Default: "x", Description: "included"},
 					{Key: "LOCKED_VAR", Default: "y", Description: "excluded", Readonly: "true"},
 				},

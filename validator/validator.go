@@ -4,7 +4,7 @@ package validator
 import (
 	"fmt"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 // Error represents a single validation failure.
@@ -20,7 +20,7 @@ func (e Error) String() string {
 
 // Validate checks a map of env values against the manifest spec.
 // Returns a slice of errors; empty slice means valid.
-func Validate(m *manifest.Manifest, env map[string]string) []Error {
+func Validate(m *compose.Project, env map[string]string) []Error {
 	var errs []Error
 
 	for _, set := range m.OrderedSets() {

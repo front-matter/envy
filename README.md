@@ -5,8 +5,8 @@
 # envy
 
 Envy is an environment variable manager for Docker. It manages `.env` and `compose.yaml` files via a structured
-`env.yaml` manifest — with structure, documentation, validation, and secret auditing built in.
-All env variables are defined in the env.yaml manifest, which generates .env files and compose.yaml files as needed. 
+`compose.yaml` manifest — with structure, documentation, validation, and secret auditing built in.
+All env variables are defined in the compose.yaml manifest, which generates .env files and compose.yaml files as needed. 
 
 All env variables are always treated as strings to avoid type casting issues with Docker and environment variables in general. 
 
@@ -49,28 +49,28 @@ brew install envy
 envy [command] [flags]
 
 Commands:
-  import      Import .env and/or compose.yaml and generate env.yaml
-  lint        Lint env.yaml for warnings
+  import      Import .env and/or compose.yaml and generate compose.yaml
+  lint        Lint compose.yaml for warnings
   diff        Show variables missing from or extra in a .env or
               compose.yaml file
-  validate    Validate an .env or compose.yaml file against env.yaml
-  compose     Generate a Docker Compose file from env.yaml
-  generate    Generate a .env file from env.yaml
+  validate    Validate an .env or compose.yaml file against compose.yaml
+  compose     Generate a Docker Compose file from compose.yaml
+  generate    Generate a .env file from compose.yaml
   secrets     List or audit secret environment variables
-  build       Generate documentation site for env.yaml file
-  server      Run local documentation site generated from env.yaml
+  build       Generate documentation site for compose.yaml file
+  server      Run local documentation site generated from compose.yaml
   deploy      Deploy documentation site to GitHub Pages
   completion  Generate shell completion scripts
 
 Global flags:
-  -m, --manifest string   Path to env.yaml (auto-detected if not given)
+  -m, --manifest string   Path to compose.yaml (auto-detected if not given)
   -v, --version           version for envy
 ```
 
 ### Workflow
 
 ```bash
-# Import env and compose files into env.yaml
+# Import env and compose files into compose.yaml
 # Auto-detects one env file: .env preferred over .env.example
 # Auto-detects one compose file in this order: compose.yaml, compose.yml, docker-compose.yaml, docker-compose.yml
 envy import
@@ -80,13 +80,16 @@ envy import .env
 envy import compose.yaml
 envy import ./config
 
-# --file accepts a folder and writes ./generated/env.yaml
+# --file accepts a folder and writes ./generated/compose.yaml
 envy import compose.yaml --file ./generated
 
 # Safety: if target file already exists, import prints a warning and does not overwrite it
 
 # Lint manifest for non-fatal issues (e.g. unknown service sets)
 envy lint
+
+# Lint Go code with go-ruleguard rules
+go tool ruleguard -rules rules/rules.go ./...
 
 # See what's missing or undocumented
 envy diff .env.prod
@@ -116,8 +119,8 @@ envy secrets --check
 # Print envy version
 envy --version
 
-# Build documentation site for env.yaml
-# If docs/index.md exists next to env.yaml, it is used as the docs home page.
+# Build documentation site for compose.yaml
+# If docs/index.md exists next to compose.yaml, it is used as the docs home page.
 envy build --destination public
 
 # Run local documentation site
@@ -126,9 +129,9 @@ envy server --bind 0.0.0.0
 # Deploy documentation site to GitHub Pages
 envy deploy --target production
 
-## env.yaml format
+## compose.yaml format
 
-`envy` reads a single `env.yaml` manifest as its source of truth:
+`envy` reads a single `compose.yaml` manifest as its source of truth:
 
 ```yaml
 meta:

@@ -14,8 +14,8 @@ var rootCmd = &cobra.Command{
 	Version:       Version,
 	Short:         "Environment variable manager",
 	SilenceErrors: true,
-	Long: `envy manages environment variables via a structured env.yaml 
-manifest. It generates .env files, validates configuration,
+	Long: `envy manages environment variables via a structured compose.yaml 
+compose. It generates .env files, validates configuration,
 produces documentation, and audits secrets.
 
 	envy import
@@ -67,6 +67,6 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(
 		&manifestPath, "manifest", "m", "",
-		"Path to env.yaml (auto-detected if not given)",
+		"Path to compose.yaml (auto-detected if not given)",
 	)
 }

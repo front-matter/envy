@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 	"github.com/front-matter/envy/writer"
 	"github.com/spf13/cobra"
 )
@@ -22,9 +22,9 @@ var (
 
 var composeCmd = &cobra.Command{
 	Use:   "compose",
-	Short: "Generate a Docker Compose file from env.yaml",
+	Short: "Generate a Docker Compose file from compose.yaml",
 	Long: `Generate a Docker Compose file with environment variables derived
-from env.yaml defaults.
+from compose.yaml defaults.
 
 Examples:
   envy compose
@@ -45,7 +45,7 @@ Examples:
 			return err
 		}
 
-		m, err := manifest.Load(path)
+		m, err := compose.Load(path)
 		if err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ func init() {
 	composeCmd.Flags().StringVarP(&composeFile, "file", "f", "",
 		"File path: folder name (creates folder and writes compose.yaml) or .yaml/.yml file path")
 	composeCmd.Flags().StringVar(&composeService, "service", "",
-		"Emit only this service (default: all services from env.yaml)")
+		"Emit only this service (default: all services from compose.yaml)")
 	composeCmd.Flags().StringVar(&composeWithoutService, "without-service", "",
 		"Comma-separated list of services to omit from the compose file")
 	composeCmd.Flags().StringVar(&composeFlavor, "flavor", "default",

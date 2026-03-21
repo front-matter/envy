@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 )
 
-// ImportEnvFile reads a .env file and converts it to an envy manifest.
-func ImportEnvFile(path string) (*manifest.Manifest, error) {
+// ImportEnvFile reads a .env file and converts it to an envy compose.
+func ImportEnvFile(path string) (*compose.Project, error) {
 	env, err := envfile.Load(path)
 	if err != nil {
 		return nil, fmt.Errorf("loading env file %s: %w", path, err)
@@ -20,10 +20,10 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 	}
 
 	// All .env variables go into a single "env" set.
-	vars := make([]manifest.Var, 0, len(env.Keys))
+	vars := make([]compose.Var, 0, len(env.Keys))
 
 	for _, key := range env.Keys {
-		vars = append(vars, manifest.Var{
+		vars = append(vars, compose.Var{
 			Key:         key,
 			Default:     "",
 			Description: "Imported from .env file",
@@ -35,14 +35,14 @@ func ImportEnvFile(path string) (*manifest.Manifest, error) {
 		return vars[i].Key < vars[j].Key
 	})
 
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{
+	m := &compose.Project{
+		Meta: compose.Meta{
 			Title:        "Imported Env Manifest",
 			Description:  fmt.Sprintf("Generated from %s", path),
 			LanguageCode: "en-US",
 			Version:      "v1",
 		},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"env": {
 				Description: "Imported from .env file",
 				Vars:        vars,

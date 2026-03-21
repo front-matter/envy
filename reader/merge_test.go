@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 )
 
 func TestImportEnvFile(t *testing.T) {
@@ -56,11 +56,11 @@ APP_NAME=TestApp
 }
 
 func TestMergeManifests(t *testing.T) {
-	env1 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "env1", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	env1 := &compose.Project{
+		Meta: compose.Meta{Title: "env1", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"db": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "DB_HOST", Default: "localhost"},
 					{Key: "DB_PORT", Default: "5432"},
 				},
@@ -68,19 +68,19 @@ func TestMergeManifests(t *testing.T) {
 		},
 	}
 
-	env2 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "env2", Version: "v1"},
-		Services: []manifest.Service{
+	env2 := &compose.Project{
+		Meta: compose.Meta{Title: "env2", Version: "v1"},
+		Services: []compose.Service{
 			{Name: "web", Image: "nginx:latest"},
 		},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"web": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "APP_NAME", Default: "myapp"},
 				},
 			},
 			"db": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "DB_HOST", Default: "db.example.com"},
 					{Key: "DB_USER", Default: "admin"},
 				},
@@ -112,11 +112,11 @@ func TestMergeManifests(t *testing.T) {
 }
 
 func TestMergeEmptyManifests(t *testing.T) {
-	m1 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "m1", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	m1 := &compose.Project{
+		Meta: compose.Meta{Title: "m1", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "SETTING_1"},
 				},
 			},
@@ -143,33 +143,33 @@ func TestMergeEmptyManifests(t *testing.T) {
 }
 
 func TestMergeThreeManifests(t *testing.T) {
-	m1 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "m1", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	m1 := &compose.Project{
+		Meta: compose.Meta{Title: "m1", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "VAR_1", Default: "value1"},
 				},
 			},
 		},
 	}
 
-	m2 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "m2", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	m2 := &compose.Project{
+		Meta: compose.Meta{Title: "m2", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "VAR_2", Default: "value2"},
 				},
 			},
 		},
 	}
 
-	m3 := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "m3", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	m3 := &compose.Project{
+		Meta: compose.Meta{Title: "m3", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"app": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "VAR_1", Default: "value1_updated"},
 					{Key: "VAR_3", Default: "value3"},
 				},
@@ -193,14 +193,14 @@ func TestMergeThreeManifests(t *testing.T) {
 }
 
 func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
-	compose := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "compose", Version: "v1"},
-		Services: []manifest.Service{
+	composeManifest := &compose.Project{
+		Meta: compose.Meta{Title: "compose", Version: "v1"},
+		Services: []compose.Service{
 			{Name: "web", Sets: []string{"web"}},
 		},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"web": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "APP_ENV", Default: "production"},
 					{Key: "DB_HOST", Default: "db"},
 				},
@@ -208,11 +208,11 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
 		},
 	}
 
-	envFile := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "env", Version: "v1"},
-		Sets: map[string]manifest.Set{
+	envFile := &compose.Project{
+		Meta: compose.Meta{Title: "env", Version: "v1"},
+		Sets: map[string]compose.Set{
 			"env": {
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "APP_ENV", Default: "local"},
 					{Key: "EXTRA_ONLY", Default: "1"},
 				},
@@ -220,7 +220,7 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
 		},
 	}
 
-	merged := Merge(compose, envFile)
+	merged := Merge(composeManifest, envFile)
 
 	envGroup := merged.Sets["env"]
 	if len(envGroup.Vars) != 1 {

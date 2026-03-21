@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 func TestParseComposeEnvValue(t *testing.T) {
@@ -38,7 +38,7 @@ func TestImportCompose(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `services:
+	composeYAML := `services:
   web:
     image: ghcr.io/example/web:latest
     platform: linux/amd64
@@ -64,7 +64,7 @@ networks:
     driver: bridge
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -84,12 +84,12 @@ networks:
 		t.Fatalf("expected worker set")
 	}
 
-	if len(m.Volumes) != 2 || m.Volumes[0] != "postgres_data" || m.Volumes[1] != "redis_data" {
-		t.Fatalf("expected volumes [postgres_data redis_data], got %v", m.Volumes)
+	if len(m.VolumeNames()) != 2 || m.VolumeNames()[0] != "postgres_data" || m.VolumeNames()[1] != "redis_data" {
+		t.Fatalf("expected volumes [postgres_data redis_data], got %v", m.VolumeNames())
 	}
 
-	if len(m.Networks) != 2 || m.Networks[0] != "backend" || m.Networks[1] != "frontend" {
-		t.Fatalf("expected networks [backend frontend], got %v", m.Networks)
+	if len(m.NetworkNames()) != 2 || m.NetworkNames()[0] != "backend" || m.NetworkNames()[1] != "frontend" {
+		t.Fatalf("expected networks [backend frontend], got %v", m.NetworkNames())
 	}
 }
 
@@ -97,14 +97,14 @@ func TestImportComposeAllowsPWDBindMountWithoutNamedVolume(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `services:
+	composeYAML := `services:
   ghost:
     image: ghost:latest
     volumes:
       - $PWD/ghost/volumes/config.production.json:/var/lib/ghost/config.production.json
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestImportComposeHeaderComments(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `# My Project
+	composeYAML := `# My Project
 # A multi-line
 # description here
 services:
@@ -136,7 +136,7 @@ services:
       APP_ENV: production
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -158,14 +158,14 @@ func TestImportComposeNoHeaderComments(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `services:
+	composeYAML := `services:
   web:
     image: ghcr.io/example/web:latest
     environment:
       APP_ENV: production
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestImportComposeWithTopLevelSOPSBlock(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `sops:
+	composeYAML := `sops:
   encrypted_regex: '^(data|stringData)$'
 services:
   web:
@@ -196,7 +196,7 @@ services:
       APP_ENV: production
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -218,7 +218,7 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `services:
+	composeYAML := `services:
   web:
     image: ghcr.io/example/web:latest
     environment:
@@ -227,7 +227,7 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
       API_URL: https://api.example.com
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 
@@ -240,7 +240,7 @@ func TestImportComposeMarksSecretsAsSecret(t *testing.T) {
 	vars := webGroup.Vars
 
 	// Find and verify the secret vars
-	var secretVar, apiSecretVar, normalVar *manifest.Var
+	var secretVar, apiSecretVar, normalVar *compose.Var
 	for i, v := range vars {
 		if v.Key == "DATABASE_PASSWORD" {
 			secretVar = &vars[i]
@@ -285,7 +285,7 @@ func TestImportComposeConsolidatesDuplicateVarsIntoCommonGroup(t *testing.T) {
 	tmp := t.TempDir()
 	composePath := filepath.Join(tmp, "compose.yaml")
 
-	compose := `services:
+	composeYAML := `services:
   web:
     image: ghcr.io/example/web:latest
     environment:
@@ -298,7 +298,7 @@ func TestImportComposeConsolidatesDuplicateVarsIntoCommonGroup(t *testing.T) {
       WORKER_CONCURRENCY: "4"
 `
 
-	if err := os.WriteFile(composePath, []byte(compose), 0o644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYAML), 0o644); err != nil {
 		t.Fatalf("write compose file: %v", err)
 	}
 

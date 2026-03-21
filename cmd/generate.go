@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/fatih/color"
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 	"github.com/front-matter/envy/writer"
 	"github.com/spf13/cobra"
 )
@@ -19,8 +19,8 @@ var (
 
 var generateCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate a .env file from env.yaml",
-	Long: `Generate a documented .env file from env.yaml.
+	Short: "Generate a .env file from compose.yaml",
+	Long: `Generate a documented .env file from compose.yaml.
 
 Examples:
   envy generate --no-secrets > .env.example
@@ -32,7 +32,7 @@ Examples:
 			return err
 		}
 
-		m, err := manifest.Load(path)
+		m, err := compose.Load(path)
 		if err != nil {
 			return err
 		}

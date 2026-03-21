@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -19,7 +19,7 @@ import (
 var buildCmd = &cobra.Command{
 	Use:                "build [hugo flags]",
 	Short:              "Generate documentation site",
-	Long:               "Generate documentation site for env.yaml file using Hugo.",
+	Long:               "Generate documentation site for compose.yaml file using Hugo.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("build", args)
@@ -29,7 +29,7 @@ var buildCmd = &cobra.Command{
 var serverCmd = &cobra.Command{
 	Use:                "server [hugo flags]",
 	Short:              "Run local documentation site",
-	Long:               "Run local documentation site generated from env.yaml",
+	Long:               "Run local documentation site generated from compose.yaml",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("server", args)
@@ -39,7 +39,7 @@ var serverCmd = &cobra.Command{
 var deployCmd = &cobra.Command{
 	Use:                "deploy [hugo flags]",
 	Short:              "Deploy documentation site",
-	Long:               "Deploy documentation site generated from env.yaml",
+	Long:               "Deploy documentation site generated from compose.yaml",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runHugoCommand("deploy", args)
@@ -61,7 +61,7 @@ func runHugoCommand(subcommand string, args []string) error {
 	buildSiteDir := ""
 	if usesGeneratedHugoSite(subcommand) {
 		if hasConfigFlag(args) {
-			return fmt.Errorf("envy %s uses env.yaml as Hugo config source; remove --config/-c", subcommand)
+			return fmt.Errorf("envy %s uses compose.yaml as Hugo config source; remove --config/-c", subcommand)
 		}
 
 		manifestFilePath, err := resolveBuildManifestPath()
@@ -139,21 +139,21 @@ func hasConfigFlag(args []string) bool {
 func resolveBuildManifestPath() (string, error) {
 	path, err := resolveManifest(manifestPath)
 	if err != nil {
-		return "", fmt.Errorf("envy build requires env.yaml: %w\n\nSuggested fields in env.yaml for Hugo:\n\nx-envy:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
+		return "", fmt.Errorf("envy build requires compose.yaml: %w\n\nSuggested fields in compose.yaml for Hugo:\n\nx-envy:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", err)
 	}
 
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("envy build requires env.yaml at %s\n\nSuggested fields in env.yaml for Hugo:\n\nx-envy:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
+			return "", fmt.Errorf("envy build requires compose.yaml at %s\n\nSuggested fields in compose.yaml for Hugo:\n\nx-envy:\n  title: My Hugo Site\n  docs: https://example.org/\n  languageCode: en-US\n  ignoreLogs:\n    - warning-goldmark-raw-html\n\nsets:\n  hugo:\n    description: Hugo site configuration\n    vars:\n      HUGO_DEFAULT_CONTENT_LANGUAGE:\n        default: \"en\"\n      HUGO_TITLE:\n        default: \"My Hugo Site\"", path)
 		}
-		return "", fmt.Errorf("checking env.yaml at %s: %w", path, err)
+		return "", fmt.Errorf("checking compose.yaml at %s: %w", path, err)
 	}
 
 	return path, nil
 }
 
 func prepareBuildAssets(path string) (string, error) {
-	m, err := manifest.Load(path)
+	m, err := compose.Load(path)
 	if err != nil {
 		return "", err
 	}
@@ -229,8 +229,8 @@ func extractDocsFS(dst string) error {
 	})
 }
 
-func writeTempHugoConfigFromManifest(m *manifest.Manifest, siteDir string) error {
-	lookup := make(map[string]manifest.Var)
+func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string) error {
+	lookup := make(map[string]compose.Var)
 	for _, v := range m.AllVars() {
 		lookup[v.Key] = v
 	}
@@ -287,7 +287,7 @@ func writeTempHugoConfigFromManifest(m *manifest.Manifest, siteDir string) error
 	return nil
 }
 
-func prepareBuildContentDir(siteRoot string, m *manifest.Manifest) (string, error) {
+func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "envy-hugo-content-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temporary Hugo content directory: %w", err)
@@ -450,7 +450,7 @@ func writeFileIfMissing(path, content string) error {
 	return nil
 }
 
-func generateHomeMarkdown(m *manifest.Manifest) string {
+func generateHomeMarkdown(m *compose.Project) string {
 	var body strings.Builder
 	title := strings.TrimSpace(defaultString(m.Meta.Title, "Configuration Reference"))
 	description := strings.TrimSpace(m.Meta.Description)
@@ -468,11 +468,11 @@ func generateHomeMarkdown(m *manifest.Manifest) string {
 	return body.String()
 }
 
-func generateSetsIndexMarkdown(m *manifest.Manifest) string {
+func generateSetsIndexMarkdown(m *compose.Project) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
 		"title":       "Sets",
-		"description": "Auto-generated configuration set reference from env.yaml.",
+		"description": "Auto-generated configuration set reference from compose.yaml.",
 		"weight":      10,
 		"sidebar": map[string]interface{}{
 			"hide": true,
@@ -493,11 +493,11 @@ func generateSetsIndexMarkdown(m *manifest.Manifest) string {
 	return body.String()
 }
 
-func generateServicesIndexMarkdown(m *manifest.Manifest) string {
+func generateServicesIndexMarkdown(m *compose.Project) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
 		"title":       "Services",
-		"description": "Auto-generated service reference from env.yaml.",
+		"description": "Auto-generated service reference from compose.yaml.",
 		"weight":      5,
 		"sidebar": map[string]interface{}{
 			"hide": true,
@@ -517,7 +517,7 @@ func generateServicesIndexMarkdown(m *manifest.Manifest) string {
 	return body.String()
 }
 
-func generateSetMarkdown(m *manifest.Manifest, set manifest.Set) string {
+func generateSetMarkdown(m *compose.Project, set compose.Set) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
 		"title":       set.Key,
@@ -551,7 +551,7 @@ func generateSetMarkdown(m *manifest.Manifest, set manifest.Set) string {
 	return body.String()
 }
 
-func renderServiceCard(m *manifest.Manifest, service manifest.Service) string {
+func renderServiceCard(m *compose.Project, service compose.Service) string {
 	var sb strings.Builder
 	titleClass := ""
 	if len(service.Sets) > 0 {
@@ -690,7 +690,7 @@ func sanitizeSetPageName(setKey string) string {
 	return replacer.Replace(setKey)
 }
 
-func setWeight(m *manifest.Manifest, setKey string) int {
+func setWeight(m *compose.Project, setKey string) int {
 	for index, set := range m.OrderedSets() {
 		if set.Key == setKey {
 			return index + 1
@@ -758,7 +758,7 @@ func escapeShortcodeRawValue(value string) string {
 	return strings.ReplaceAll(value, "`", "'")
 }
 
-func renderSetCard(set manifest.Set, services []string) string {
+func renderSetCard(set compose.Set, services []string) string {
 	var sb strings.Builder
 	titleClass := "hx:text-4xl md:hx:text-5xl hx:tracking-tight"
 	if len(services) > 0 {
@@ -800,7 +800,7 @@ func renderSetCard(set manifest.Set, services []string) string {
 	return sb.String()
 }
 
-func renderSetOverviewCard(set manifest.Set, services []string) string {
+func renderSetOverviewCard(set compose.Set, services []string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\"",
 		escapeShortcodeValue(set.Key),
@@ -893,7 +893,7 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
-func variableCardTag(variable manifest.Var) (string, string, string) {
+func variableCardTag(variable compose.Var) (string, string, string) {
 	if variable.IsSecret() {
 		return "secret", "orange", "false"
 	}
@@ -903,7 +903,7 @@ func variableCardTag(variable manifest.Var) (string, string, string) {
 	return "", "", ""
 }
 
-func variableCardClass(variable manifest.Var) string {
+func variableCardClass(variable compose.Var) string {
 	var classes []string
 	if variable.IsReadonly() {
 		classes = append(classes, "read-only")
@@ -914,7 +914,7 @@ func variableCardClass(variable manifest.Var) string {
 	return strings.Join(classes, " ")
 }
 
-func variableCardSubtitle(variable manifest.Var) string {
+func variableCardSubtitle(variable compose.Var) string {
 	parts := make([]string, 0, 5)
 	if strings.TrimSpace(variable.Description) != "" {
 		parts = append(parts, strings.TrimSpace(variable.Description))
@@ -946,7 +946,7 @@ func variableCardSubtitle(variable manifest.Var) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func variableCardHTML(variable manifest.Var) string {
+func variableCardHTML(variable compose.Var) string {
 	defaultValue := strings.TrimSpace(variable.DefaultString())
 	if defaultValue == "" || variable.IsSecret() {
 		return ""
@@ -973,7 +973,7 @@ func variableHeadingAnchor(key string) string {
 	return trimmed
 }
 
-func servicesForSet(m *manifest.Manifest, setKey string) []string {
+func servicesForSet(m *compose.Project, setKey string) []string {
 	services := make([]string, 0)
 	for _, service := range m.Services {
 		for _, serviceSet := range service.Sets {

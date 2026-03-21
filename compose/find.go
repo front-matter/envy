@@ -1,4 +1,4 @@
-package manifest
+package compose
 
 import (
 	"errors"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// Find walks up from the current directory looking for env.yaml.
+// Find walks up from the current directory looking for compose.yaml.
 func Find() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -14,7 +14,7 @@ func Find() (string, error) {
 	}
 
 	for {
-		candidate := filepath.Join(dir, "env.yaml")
+		candidate := filepath.Join(dir, "compose.yaml")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
@@ -25,6 +25,6 @@ func Find() (string, error) {
 		dir = parent
 	}
 	return "", errors.New(
-		"env.yaml not found — run from your instance root or pass --manifest",
+		"compose.yaml not found — run from your instance root or pass --manifest",
 	)
 }

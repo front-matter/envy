@@ -1,5 +1,5 @@
-// Package manifest loads and provides access to the env.yaml spec.
-package manifest
+// Package compose loads and provides access to the compose.yaml spec.
+package compose
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	types "github.com/compose-spec/compose-go/v2/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,17 +17,160 @@ var markdownLinkPattern = regexp.MustCompile(`\[[^\]]+\]\((https?://[^)\s]+)\)`)
 var plainLinkPattern = regexp.MustCompile(`^https?://\S+$`)
 var prefixedLinkPattern = regexp.MustCompile(`(?i)^link:\s*(https?://\S+)$`)
 
-// Manifest is the top-level env.yaml structure.
-type Manifest struct {
+// Project is the top-level structure used by envy. It embeds compose-go's Project
+// as the canonical type and adds envy-specific metadata and functionality.
+type Project struct {
+	*types.Project
 	Meta     Meta           `yaml:"x-envy"`
-	Services []Service      `yaml:"services,omitempty"`
+	Services Services       `yaml:"services"`
 	Sets     map[string]Set `yaml:"-"`
-	Volumes  []string       `yaml:"volumes,omitempty"`
-	Networks []string       `yaml:"networks,omitempty"`
+}
+
+// Meta holds envy-specific metadata.
+type Meta struct {
+	Title        string   `yaml:"title,omitempty"`
+	Docs         string   `yaml:"docs,omitempty"`
+	Author       string   `yaml:"author,omitempty"`
+	LanguageCode string   `yaml:"languageCode,omitempty"`
+	Description  string   `yaml:"description,omitempty"`
+	Version      string   `yaml:"version,omitempty"`
+	IgnoreLogs   []string `yaml:"ignoreLogs,omitempty"`
+}
+
+// Services describes the ordered list of runtime services.
+type Services []Service
+
+// Service describes a runtime service and the sets it uses.
+type Service struct {
+	Name        string   `yaml:"name"`
+	Image       string   `yaml:"image,omitempty"`
+	Platform    string   `yaml:"platform,omitempty"`
+	Entrypoint  []string `yaml:"entrypoint,omitempty"`
+	Command     []string `yaml:"command,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Sets        []string `yaml:"-"`
+}
+
+type serviceYAML struct {
+	Image       string     `yaml:"image,omitempty"`
+	Platform    string     `yaml:"platform,omitempty"`
+	Entrypoint  []string   `yaml:"entrypoint,omitempty"`
+	Command     *yaml.Node `yaml:"command,omitempty"`
+	Description string     `yaml:"description,omitempty"`
+	Sets        *yaml.Node `yaml:"sets,omitempty"`
+}
+
+// Set is a logical grouping of related env variables.
+type Set struct {
+	Key         string `yaml:"-"`
+	Description string `yaml:"description,omitempty"`
+	Link        string `yaml:"link,omitempty"`
+	Vars        []Var  `yaml:"vars,omitempty"`
+}
+
+// Var defines a single environment variable's spec.
+type Var struct {
+	Key         string `yaml:"key"`
+	Description string `yaml:"description,omitempty"`
+	Default     string `yaml:"default,omitempty"`
+	Required    string `yaml:"required,omitempty"`
+	Secret      string `yaml:"secret,omitempty"`
+	Readonly    string `yaml:"readonly,omitempty"`
+	Example     string `yaml:"example,omitempty"`
+}
+
+// SetVars holds vars for a single set.
+type SetVars struct {
+	SetKey      string
+	Description string
+	Vars        []Var
+}
+
+// LintIssue represents one lint finding.
+type LintIssue struct {
+	Level   string // error | warning
+	Rule    string
+	Path    string
+	Message string
+}
+
+func (p *Project) ensureComposeProject() {
+	if p.Project == nil {
+		p.Project = &types.Project{}
+	}
+	if p.Project.Services == nil {
+		p.Project.Services = types.Services{}
+	}
+	if p.Project.Volumes == nil {
+		p.Project.Volumes = types.Volumes{}
+	}
+	if p.Project.Networks == nil {
+		p.Project.Networks = types.Networks{}
+	}
+}
+
+func (p *Project) setVolumeNames(names []string) {
+	p.ensureComposeProject()
+	p.Project.Volumes = types.Volumes{}
+	for _, name := range names {
+		p.Project.Volumes[name] = types.VolumeConfig{}
+	}
+}
+
+// SetVolumeNames replaces project volumes by name.
+func (p *Project) SetVolumeNames(names []string) {
+	p.setVolumeNames(names)
+}
+
+func (p *Project) setNetworkNames(names []string) {
+	p.ensureComposeProject()
+	p.Project.Networks = types.Networks{}
+	for _, name := range names {
+		p.Project.Networks[name] = types.NetworkConfig{}
+	}
+}
+
+// SetNetworkNames replaces project networks by name.
+func (p *Project) SetNetworkNames(names []string) {
+	p.setNetworkNames(names)
+}
+
+func (p *Project) volumeNames() []string {
+	if p == nil || p.Project == nil || len(p.Project.Volumes) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(p.Project.Volumes))
+	for name := range p.Project.Volumes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// VolumeNames returns sorted volume names from embedded compose-go project data.
+func (p *Project) VolumeNames() []string {
+	return p.volumeNames()
+}
+
+func (p *Project) networkNames() []string {
+	if p == nil || p.Project == nil || len(p.Project.Networks) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(p.Project.Networks))
+	for name := range p.Project.Networks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// NetworkNames returns sorted network names from embedded compose-go project data.
+func (p *Project) NetworkNames() []string {
+	return p.networkNames()
 }
 
 // MarshalYAML omits sets with no vars and writes services/vars in mapping style.
-func (m Manifest) MarshalYAML() (interface{}, error) {
+func (m Project) MarshalYAML() (interface{}, error) {
 	filteredSets := make(map[string]Set)
 	for key, set := range m.Sets {
 		if len(set.Vars) > 0 {
@@ -71,13 +215,15 @@ func (m Manifest) MarshalYAML() (interface{}, error) {
 		appendMapping(root, "services", servicesNode)
 	}
 
-	if len(m.Volumes) > 0 {
-		volumesNode := encodeNamedEmptyMapNode(m.Volumes)
+	volumeNames := m.volumeNames()
+	if len(volumeNames) > 0 {
+		volumesNode := encodeNamedEmptyMapNode(volumeNames)
 		appendMapping(root, "volumes", volumesNode)
 	}
 
-	if len(m.Networks) > 0 {
-		networksNode, err := encodeStringSliceNode(m.Networks)
+	networkNames := m.networkNames()
+	if len(networkNames) > 0 {
+		networksNode, err := encodeStringSliceNode(networkNames)
 		if err != nil {
 			return nil, err
 		}
@@ -87,12 +233,12 @@ func (m Manifest) MarshalYAML() (interface{}, error) {
 	return root, nil
 }
 
-func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
+func (m *Project) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("expected manifest mapping, got YAML kind %d", node.Kind)
 	}
 
-	var out Manifest
+	var out Project
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		value := node.Content[i+1]
@@ -147,11 +293,13 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 				if err != nil {
 					return err
 				}
-				out.Volumes = volumes
+				out.setVolumeNames(volumes)
 			case "networks":
-				if err := value.Decode(&out.Networks); err != nil {
+				var networks []string
+				if err := value.Decode(&networks); err != nil {
 					return err
 				}
+				out.setNetworkNames(networks)
 			}
 			continue
 		}
@@ -161,18 +309,8 @@ func (m *Manifest) UnmarshalYAML(node *yaml.Node) error {
 	if m.Sets == nil {
 		m.Sets = make(map[string]Set)
 	}
+	m.ensureComposeProject()
 	return nil
-}
-
-// Meta holds project-level metadata.
-type Meta struct {
-	Title        string   `yaml:"title,omitempty"`
-	Docs         string   `yaml:"docs,omitempty"`
-	Author       string   `yaml:"author,omitempty"`
-	LanguageCode string   `yaml:"languageCode,omitempty"`
-	Description  string   `yaml:"description,omitempty"`
-	Version      string   `yaml:"version,omitempty"`
-	IgnoreLogs   []string `yaml:"ignoreLogs,omitempty"`
 }
 
 // VersionLabel returns the configured version label.
@@ -186,26 +324,6 @@ func (m Meta) LanguageCodeLabel() string {
 		return "en-US"
 	}
 	return m.LanguageCode
-}
-
-// Service describes a runtime service and the sets it uses.
-type Service struct {
-	Name        string   `yaml:"name"`
-	Image       string   `yaml:"image,omitempty"`
-	Platform    string   `yaml:"platform,omitempty"`
-	Entrypoint  []string `yaml:"entrypoint,omitempty"`
-	Command     []string `yaml:"command,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Sets        []string `yaml:"-"`
-}
-
-type serviceYAML struct {
-	Image       string     `yaml:"image,omitempty"`
-	Platform    string     `yaml:"platform,omitempty"`
-	Entrypoint  []string   `yaml:"entrypoint,omitempty"`
-	Command     *yaml.Node `yaml:"command,omitempty"`
-	Description string     `yaml:"description,omitempty"`
-	Sets        *yaml.Node `yaml:"sets,omitempty"`
 }
 
 // MarshalYAML emits command and sets in flow style.
@@ -337,22 +455,8 @@ func isValidImageReference(value string) bool {
 	return dockerImagePattern.MatchString(value)
 }
 
-// Set is a logical grouping of related variables.
-type Set struct {
-	Key         string `yaml:"-"`
-	Description string `yaml:"description,omitempty"`
-	Link        string `yaml:"link,omitempty"`
-	Vars        []Var  `yaml:"vars,omitempty"`
-}
-
-type setYAML struct {
-	Description string     `yaml:"description,omitempty"`
-	Link        string     `yaml:"link,omitempty"`
-	Vars        *yaml.Node `yaml:"vars,omitempty"`
-}
-
 // OrderedSets returns all sets in deterministic order.
-func (m *Manifest) OrderedSets() []Set {
+func (m *Project) OrderedSets() []Set {
 	keys := make([]string, 0, len(m.Sets))
 	for key := range m.Sets {
 		keys = append(keys, key)
@@ -367,17 +471,6 @@ func (m *Manifest) OrderedSets() []Set {
 	}
 
 	return sets
-}
-
-// Var defines a single environment variable's spec.
-type Var struct {
-	Key         string `yaml:"key"`
-	Description string `yaml:"description,omitempty"`
-	Default     string `yaml:"default,omitempty"`
-	Required    string `yaml:"required,omitempty"`
-	Secret      string `yaml:"secret,omitempty"`
-	Readonly    string `yaml:"readonly,omitempty"`
-	Example     string `yaml:"example,omitempty"`
 }
 
 func (v Var) DefaultString() string {
@@ -545,12 +638,12 @@ func encodeServiceNode(svc Service, setNodes map[string]*yaml.Node) (*yaml.Node,
 	return serviceNode, nil
 }
 
-func decodeServicesNode(node *yaml.Node) ([]Service, error) {
+func decodeServicesNode(node *yaml.Node) (Services, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("expected services mapping, got YAML kind %d", node.Kind)
 	}
 
-	services := make([]Service, 0, len(node.Content)/2)
+	services := make(Services, 0, len(node.Content)/2)
 	for i := 0; i < len(node.Content); i += 2 {
 		name := node.Content[i].Value
 		var svc Service
@@ -774,27 +867,12 @@ func decodeNamedEntriesNode(node *yaml.Node) ([]string, error) {
 }
 
 // AllVars returns a flat slice of all variables across all sets.
-func (m *Manifest) AllVars() []Var {
+func (m *Project) AllVars() []Var {
 	var vars []Var
 	for _, set := range m.OrderedSets() {
 		vars = append(vars, set.Vars...)
 	}
 	return vars
-}
-
-// SetVars holds vars for a single set.
-type SetVars struct {
-	SetKey      string
-	Description string
-	Vars        []Var
-}
-
-// LintIssue represents one lint finding.
-type LintIssue struct {
-	Level   string // error | warning
-	Rule    string
-	Path    string
-	Message string
 }
 
 func (i LintIssue) String() string {
@@ -805,7 +883,7 @@ func (i LintIssue) String() string {
 }
 
 // VarsForServiceBySet returns vars per set for a service, preserving set order.
-func (m *Manifest) VarsForServiceBySet(serviceName string) []SetVars {
+func (m *Project) VarsForServiceBySet(serviceName string) []SetVars {
 	name := strings.TrimSpace(serviceName)
 	if name == "" {
 		var result []SetVars
@@ -838,7 +916,7 @@ func (m *Manifest) VarsForServiceBySet(serviceName string) []SetVars {
 }
 
 // VarsForService returns vars for one service, or all vars if service is unknown.
-func (m *Manifest) VarsForService(serviceName string) []Var {
+func (m *Project) VarsForService(serviceName string) []Var {
 	name := strings.TrimSpace(serviceName)
 	if name == "" {
 		return m.AllVars()
@@ -864,7 +942,7 @@ func (m *Manifest) VarsForService(serviceName string) []Var {
 }
 
 // SecretVars returns only variables marked secret.
-func (m *Manifest) SecretVars() []Var {
+func (m *Project) SecretVars() []Var {
 	var vars []Var
 	for _, v := range m.AllVars() {
 		if v.IsSecret() {
@@ -875,7 +953,7 @@ func (m *Manifest) SecretVars() []Var {
 }
 
 // RequiredVars returns only variables marked required.
-func (m *Manifest) RequiredVars() []Var {
+func (m *Project) RequiredVars() []Var {
 	var vars []Var
 	for _, v := range m.AllVars() {
 		if v.IsRequired() {
@@ -886,7 +964,7 @@ func (m *Manifest) RequiredVars() []Var {
 }
 
 // Lint returns warnings for values that are legal but potentially ambiguous.
-func (m *Manifest) Lint() []string {
+func (m *Project) Lint() []string {
 	issues := m.LintIssues()
 	warnings := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -896,7 +974,7 @@ func (m *Manifest) Lint() []string {
 }
 
 // LintIssues returns DCLint-inspired lint findings with severity and rule IDs.
-func (m *Manifest) LintIssues() []LintIssue {
+func (m *Project) LintIssues() []LintIssue {
 	var issues []LintIssue
 	seenServices := make(map[string]bool)
 	usedSets := make(map[string]bool)
@@ -1008,7 +1086,7 @@ func (m *Manifest) LintIssues() []LintIssue {
 	return issues
 }
 
-func areServiceNamesSorted(services []Service) bool {
+func areServiceNamesSorted(services Services) bool {
 	if len(services) < 2 {
 		return true
 	}
@@ -1047,13 +1125,13 @@ func hasUnstableImageTag(image string) bool {
 	}
 }
 
-// Load reads and parses an env.yaml file.
-func Load(path string) (*Manifest, error) {
+// Load reads and parses an compose.yaml file.
+func Load(path string) (*Project, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading manifest %s: %w", path, err)
 	}
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parsing manifest %s: %w", path, err)
 	}

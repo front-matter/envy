@@ -14,13 +14,13 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 var interpolationPattern = regexp.MustCompile(`^\$\{([^}:]+)(?:(:?[-?])(.*))?\}$`)
 
-// ImportCompose reads a compose file and converts it to an envy manifest.
-func ImportCompose(path string) (*manifest.Manifest, error) {
+// ImportCompose reads a compose file and converts it to an envy compose.
+func ImportCompose(path string) (*compose.Project, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolving compose file path %s: %w", path, err)
@@ -63,18 +63,18 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 		metaTitle = "Imported Compose Manifest"
 	}
 
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{
+	m := &compose.Project{
+		Meta: compose.Meta{
 			Title:        metaTitle,
 			Description:  metaDescription,
 			LanguageCode: "en-US",
 			Version:      "v1",
 		},
-		Services: make([]manifest.Service, 0, len(serviceNames)),
-		Sets:     make(map[string]manifest.Set),
-		Volumes:  volumes,
-		Networks: networks,
+		Services: make([]compose.Service, 0, len(serviceNames)),
+		Sets:        make(map[string]compose.Set),
 	}
+	m.SetVolumeNames(volumes)
+	m.SetNetworkNames(networks)
 
 	for _, serviceName := range serviceNames {
 		svc := project.Services[serviceName]
@@ -82,7 +82,7 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 
 		vars := composeEnvToVars(svc.Environment)
 
-		m.Services = append(m.Services, manifest.Service{
+		m.Services = append(m.Services, compose.Service{
 			Name:       serviceName,
 			Image:      strings.TrimSpace(svc.Image),
 			Platform:   strings.TrimSpace(svc.Platform),
@@ -91,7 +91,7 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 			Sets:       []string{setKey},
 		})
 
-		m.Sets[setKey] = manifest.Set{
+		m.Sets[setKey] = compose.Set{
 			Description: fmt.Sprintf("Imported environment for service %s", serviceName),
 			Vars:        vars,
 		}
@@ -102,12 +102,12 @@ func ImportCompose(path string) (*manifest.Manifest, error) {
 	return m, nil
 }
 
-func consolidateCommonSetVars(m *manifest.Manifest) {
+func consolidateCommonSetVars(m *compose.Project) {
 	if m == nil || len(m.Services) < 2 {
 		return
 	}
 
-	varDefinitions := make(map[string]manifest.Var)
+	varDefinitions := make(map[string]compose.Var)
 	varSets := make(map[string][]string)
 	varConflicts := make(map[string]bool)
 
@@ -147,7 +147,7 @@ func consolidateCommonSetVars(m *manifest.Manifest) {
 
 	affectedSets := make(map[string]bool)
 	for setKey, set := range m.Sets {
-		filtered := make([]manifest.Var, 0, len(set.Vars))
+		filtered := make([]compose.Var, 0, len(set.Vars))
 		removedAny := false
 		for _, variable := range set.Vars {
 			if commonKeySet[variable.Key] {
@@ -170,7 +170,7 @@ func consolidateCommonSetVars(m *manifest.Manifest) {
 		m.Sets[setKey] = set
 	}
 
-	commonVars := make([]manifest.Var, 0, len(commonKeys))
+	commonVars := make([]compose.Var, 0, len(commonKeys))
 	for _, key := range commonKeys {
 		commonVars = append(commonVars, varDefinitions[key])
 	}
@@ -180,7 +180,7 @@ func consolidateCommonSetVars(m *manifest.Manifest) {
 		existing.Vars = mergeVars(existing.Vars, commonVars)
 		m.Sets["common"] = existing
 	} else {
-		m.Sets["common"] = manifest.Set{
+		m.Sets["common"] = compose.Set{
 			Description: "Shared environment for multiple services",
 			Vars:        commonVars,
 		}
@@ -205,7 +205,7 @@ func consolidateCommonSetVars(m *manifest.Manifest) {
 	}
 }
 
-func sameManifestVar(left, right manifest.Var) bool {
+func sameManifestVar(left, right compose.Var) bool {
 	return left.Key == right.Key &&
 		left.Description == right.Description &&
 		left.Default == right.Default &&
@@ -289,14 +289,14 @@ func serviceSetKey(serviceName string) string {
 	return key
 }
 
-func composeEnvToVars(env types.MappingWithEquals) []manifest.Var {
+func composeEnvToVars(env types.MappingWithEquals) []compose.Var {
 	keys := make([]string, 0, len(env))
 	for key := range env {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 
-	vars := make([]manifest.Var, 0, len(keys))
+	vars := make([]compose.Var, 0, len(keys))
 	for _, key := range keys {
 		var rawValue string
 		if v := env[key]; v != nil {
@@ -311,7 +311,7 @@ func composeEnvToVars(env types.MappingWithEquals) []manifest.Var {
 			defaultValue = ""
 		}
 
-		vars = append(vars, manifest.Var{
+		vars = append(vars, compose.Var{
 			Key:         key,
 			Default:     defaultValue,
 			Description: "Imported from compose environment",

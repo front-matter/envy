@@ -1,4 +1,4 @@
-package manifest
+package compose
 
 import (
 	"strings"
@@ -35,9 +35,9 @@ func TestStringDefaultUnmarshalYAML(t *testing.T) {
 }
 
 func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
-	m := Manifest{
+	m := Project{
 		Meta: Meta{
-			Title:   "Imported Compose Manifest",
+			Title:   "Imported Compose Project",
 			Version: "v1",
 		},
 		Services: []Service{{
@@ -81,8 +81,8 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 }
 
 func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
-	m := Manifest{
-		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
+	m := Project{
+		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
 		Services: []Service{
 			{Name: "web", Sets: []string{"web"}},
 			{Name: "cache", Sets: []string{"cache"}},
@@ -112,8 +112,8 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 }
 
 func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
-	m := Manifest{
-		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
+	m := Project{
+		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
 		Sets: map[string]Set{
 			"env": {
 				Vars: []Var{
@@ -170,8 +170,8 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 }
 
 func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
-	m := Manifest{
-		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
+	m := Project{
+		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
 		Services: []Service{{
 			Name:    "worker",
 			Image:   "ghcr.io/example/worker:latest",
@@ -207,10 +207,10 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 }
 
 func TestManifestMarshalVolumesAsComposeStyleMap(t *testing.T) {
-	m := Manifest{
-		Meta:    Meta{Title: "Imported Compose Manifest", Version: "v1"},
-		Volumes: []string{"app_data", "uploaded_data"},
+	m := Project{
+		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
 	}
+	m.SetVolumeNames([]string{"app_data", "uploaded_data"})
 
 	data, err := yaml.Marshal(m)
 	if err != nil {
@@ -236,13 +236,14 @@ func TestManifestLoadVolumesFromComposeStyleMap(t *testing.T) {
 		"  uploaded_data:",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	if len(m.Volumes) != 2 || m.Volumes[0] != "app_data" || m.Volumes[1] != "uploaded_data" {
-		t.Fatalf("expected volumes [app_data uploaded_data], got %+v", m.Volumes)
+	volumes := m.VolumeNames()
+	if len(volumes) != 2 || volumes[0] != "app_data" || volumes[1] != "uploaded_data" {
+		t.Fatalf("expected volumes [app_data uploaded_data], got %+v", volumes)
 	}
 }
 
@@ -263,7 +264,7 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 		"      <<: [*application]",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -301,7 +302,7 @@ func TestManifestLoadServiceScalarSet(t *testing.T) {
 		"      <<: *coolify",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -325,7 +326,7 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 		"    secret: true",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -358,7 +359,7 @@ func TestManifestLoadGroupLink(t *testing.T) {
 		"    default: production",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -391,7 +392,7 @@ func TestManifestLoadSetDescriptionAndLinkFromComments(t *testing.T) {
 		"    default: production",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -419,7 +420,7 @@ func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
 		"    default: production",
 	}, "\n")
 
-	var m Manifest
+	var m Project
 	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
@@ -437,8 +438,8 @@ func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
 }
 
 func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
-	m := Manifest{
-		Meta: Meta{Title: "Imported Compose Manifest", Version: "v1"},
+	m := Project{
+		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
 		Sets: map[string]Set{
 			"web": {
 				Vars: []Var{{
@@ -461,8 +462,8 @@ func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 }
 
 func TestManifestMarshalOmitsImportedEnvFileVarDescription(t *testing.T) {
-	m := Manifest{
-		Meta: Meta{Title: "Imported Env Manifest", Version: "v1"},
+	m := Project{
+		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
 		Sets: map[string]Set{
 			"env": {
 				Vars: []Var{{
@@ -532,7 +533,7 @@ func TestIsValidImageReference(t *testing.T) {
 }
 
 func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
-	m := &Manifest{
+	m := &Project{
 		Meta: Meta{Title: "Example"},
 		Services: []Service{
 			{
@@ -567,7 +568,7 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 }
 
 func TestLintAllowsMissingPlatform(t *testing.T) {
-	m := &Manifest{
+	m := &Project{
 		Meta: Meta{Title: "Example"},
 		Services: []Service{
 			{
@@ -589,7 +590,7 @@ func TestLintAllowsMissingPlatform(t *testing.T) {
 }
 
 func TestLintRejectsLatestTag(t *testing.T) {
-	m := &Manifest{
+	m := &Project{
 		Meta: Meta{Title: "Example"},
 		Services: []Service{{
 			Name:  "web",
@@ -614,7 +615,7 @@ func TestLintRejectsLatestTag(t *testing.T) {
 }
 
 func TestLintErrorsWhenSetIsUnusedByServices(t *testing.T) {
-	m := &Manifest{
+	m := &Project{
 		Meta: Meta{Title: "Example"},
 		Services: []Service{{
 			Name:  "web",
@@ -642,7 +643,7 @@ func TestLintErrorsWhenSetIsUnusedByServices(t *testing.T) {
 }
 
 func TestLintDoesNotErrorWhenAllSetsAreUsed(t *testing.T) {
-	m := &Manifest{
+	m := &Project{
 		Meta: Meta{Title: "Example"},
 		Services: []Service{{
 			Name:  "web",

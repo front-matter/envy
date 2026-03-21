@@ -1,11 +1,11 @@
-// Package writer renders env.yaml into a .env file.
+// Package writer renders compose.yaml into a .env file.
 package writer
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 // Options controls what the writer emits.
@@ -13,12 +13,12 @@ type Options struct {
 	IncludeSecrets bool
 }
 
-// Generate renders env.yaml into a documented .env string.
-func Generate(m *manifest.Manifest, opts Options) string {
+// Generate renders compose.yaml into a documented .env string.
+func Generate(m *compose.Project, opts Options) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# %s — Environment Configuration\n", m.Meta.Title))
-	sb.WriteString("# Generated from env.yaml — edit env.yaml, not this file.\n")
+	sb.WriteString("# Generated from compose.yaml — edit compose.yaml, not this file.\n")
 	sb.WriteString(fmt.Sprintf("# Version: %s\n", m.Meta.VersionLabel()))
 	sb.WriteString(fmt.Sprintf("# Docs: %s\n", m.Meta.Docs))
 	sb.WriteString("\n")

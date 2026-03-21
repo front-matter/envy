@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,20 +20,20 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("WriteFile(about.md): %v", err)
 	}
 
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "Example", Description: "Example description", Version: "v1"},
-		Services: []manifest.Service{{
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example", Description: "Example description", Version: "v1"},
+		Services: []compose.Service{{
 			Name:     "web",
 			Image:    "caddy:2.10",
 			Platform: "linux/amd64",
 			Command:  []string{"caddy", "run", "--config", "/etc/caddy/Caddyfile"},
 			Sets:     []string{"common"},
 		}},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"common": {
 				Description: "Shared settings for runtime services.",
 				Link:        "https://example.org/common",
-				Vars: []manifest.Var{
+				Vars: []compose.Var{
 					{Key: "APP_ENV", Default: "production", Example: "staging"},
 					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
 				},
@@ -194,8 +194,8 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 		t.Fatalf("WriteFile(common.md): %v", err)
 	}
 
-	m := &manifest.Manifest{
-		Sets: map[string]manifest.Set{
+	m := &compose.Project{
+		Sets: map[string]compose.Set{
 			"common": {Description: "Shared settings."},
 		},
 	}
@@ -229,8 +229,8 @@ func TestPrepareBuildContentDirUsesDocsIndexAsHome(t *testing.T) {
 		t.Fatalf("WriteFile(README.md): %v", err)
 	}
 
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "Example"},
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
 	}
 
 	contentDir, err := prepareBuildContentDir(siteRoot, m)
@@ -258,8 +258,8 @@ func TestPrepareBuildContentDirUsesReadmeAsHome(t *testing.T) {
 		t.Fatalf("WriteFile(README.md): %v", err)
 	}
 
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{Title: "Example"},
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
 	}
 
 	contentDir, err := prepareBuildContentDir(siteRoot, m)
@@ -300,8 +300,8 @@ func TestUsesGeneratedHugoSite(t *testing.T) {
 
 func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	siteDir := t.TempDir()
-	m := &manifest.Manifest{
-		Meta: manifest.Meta{
+	m := &compose.Project{
+		Meta: compose.Meta{
 			Title:      "Example",
 			IgnoreLogs: []string{"warning-goldmark-raw-html"},
 		},

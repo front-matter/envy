@@ -5,17 +5,17 @@ import (
 	"sort"
 
 	"github.com/fatih/color"
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 	"github.com/spf13/cobra"
 )
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [path]",
 	Short: "Show variables missing from or extra in a .env file",
-	Long: `Compare env.yaml against a .env file.
+	Long: `Compare compose.yaml against a .env file.
 Reports variables defined in the manifest but absent from the file,
-and variables present in the file but not in the manifest.
+and variables present in the file but not in the compose.
 
 Examples:
 	  envy diff
@@ -28,7 +28,7 @@ Examples:
 			return err
 		}
 
-		m, err := manifest.Load(path)
+		m, err := compose.Load(path)
 		if err != nil {
 			return err
 		}
@@ -69,19 +69,19 @@ Examples:
 		sort.Strings(extra)
 
 		if len(missing) == 0 && len(extra) == 0 {
-			color.Green("\n✅ %s matches env.yaml exactly.\n", envPath)
+			color.Green("\n✅ %s matches compose.yaml exactly.\n", envPath)
 			return nil
 		}
 
 		if len(missing) > 0 {
-			color.Yellow("\n⚠️  In env.yaml but missing from %s:", envPath)
+			color.Yellow("\n⚠️  In compose.yaml but missing from %s:", envPath)
 			for _, k := range missing {
 				fmt.Printf("   - %s\n", k)
 			}
 		}
 
 		if len(extra) > 0 {
-			color.Yellow("\n⚠️ In %s but not in env.yaml:", envPath)
+			color.Yellow("\n⚠️ In %s but not in compose.yaml:", envPath)
 			for _, k := range extra {
 				fmt.Printf("   + %s\n", k)
 			}

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ var secretsCheck bool
 var secretsCmd = &cobra.Command{
 	Use:   "secrets",
 	Short: "List or audit secret environment variables",
-	Long: `List all variables marked as secret in env.yaml.
+	Long: `List all variables marked as secret in compose.yaml.
 With --check, scans git-tracked files for exposed secret values.
 
 Examples:
@@ -29,7 +29,7 @@ Examples:
 			return err
 		}
 
-		m, err := manifest.Load(path)
+		m, err := compose.Load(path)
 		if err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ Examples:
 	},
 }
 
-func runSecretsCheck(m *manifest.Manifest) error {
+func runSecretsCheck(m *compose.Project) error {
 	var secretKeys []string
 	for _, v := range m.SecretVars() {
 		secretKeys = append(secretKeys, v.Key)

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 // resolveManifest returns the manifest path from the flag or auto-detection.
@@ -14,7 +14,7 @@ func resolveManifest(flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
-	return manifest.Find()
+	return compose.Find()
 }
 
 // resolveCommandFilePath resolves a file-or-folder output path.

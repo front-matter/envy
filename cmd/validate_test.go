@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidateComposeFileCallsComposeConfigRunner(t *testing.T) {
-	path := "./env.yaml"
+	path := "./compose.yaml"
 
 	originalRunner := composeConfigRunner
 	t.Cleanup(func() {
@@ -41,7 +41,7 @@ func TestValidateComposeFileIncludesComposeConfigOutputOnError(t *testing.T) {
 		return "services.web.image is required", errors.New("exit status 1")
 	}
 
-	err := validateComposeFile("./env.yaml")
+	err := validateComposeFile("./compose.yaml")
 	if err == nil {
 		t.Fatalf("expected validateComposeFile to fail")
 	}

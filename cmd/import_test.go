@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/front-matter/envy/manifest"
+	"github.com/front-matter/envy/compose"
 )
 
 func TestResolvePathFile(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "nested", "manifest.yaml")
+	path := filepath.Join(tmp, "nested", "compose.yaml")
 
 	got, err := resolvePath(path)
 	if err != nil {
@@ -39,7 +39,7 @@ func TestResolvePathFolder(t *testing.T) {
 		t.Fatalf("resolvePath(folder): %v", err)
 	}
 
-	want := filepath.Join(folder, "env.yaml")
+	want := filepath.Join(folder, "compose.yaml")
 	if got != want {
 		t.Fatalf("resolvePath(folder) = %q, want %q", got, want)
 	}
@@ -55,7 +55,7 @@ func TestResolvePathFolder(t *testing.T) {
 
 func TestFileExists(t *testing.T) {
 	tmp := t.TempDir()
-	path := filepath.Join(tmp, "env.yaml")
+	path := filepath.Join(tmp, "compose.yaml")
 
 	exists, err := FileExists(path)
 	if err != nil {
@@ -80,7 +80,7 @@ func TestFileExists(t *testing.T) {
 
 func TestFileExistsDirectory(t *testing.T) {
 	tmp := t.TempDir()
-	dirPath := filepath.Join(tmp, "env.yaml")
+	dirPath := filepath.Join(tmp, "compose.yaml")
 
 	if err := os.MkdirAll(dirPath, 0o755); err != nil {
 		t.Fatalf("creating dir: %v", err)
@@ -178,7 +178,7 @@ func TestFindImportFilesComposeFallbackOrder(t *testing.T) {
 func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	tmp := t.TempDir()
 	envPath := filepath.Join(tmp, ".env")
-	outputPath := filepath.Join(tmp, "env.yaml")
+	outputPath := filepath.Join(tmp, "compose.yaml")
 
 	envContent := "BOOL_TRUE=true\nBOOL_FALSE=false\n"
 	if err := os.WriteFile(envPath, []byte(envContent), 0o644); err != nil {
@@ -197,7 +197,7 @@ func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("reading generated env.yaml: %v", err)
+		t.Fatalf("reading generated compose.yaml: %v", err)
 	}
 
 	output := string(data)
@@ -208,26 +208,26 @@ func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 		t.Fatalf("expected BOOL_FALSE to be omitted as secret var, got:\n%s", output)
 	}
 	if strings.Contains(output, "secret:") {
-		t.Fatalf("expected no secret fields in generated env.yaml, got:\n%s", output)
+		t.Fatalf("expected no secret fields in generated compose.yaml, got:\n%s", output)
 	}
 	if strings.Contains(output, "sets:") {
 		t.Fatalf("expected sets section to be omitted when all vars are secret, got:\n%s", output)
 	}
 	if !strings.Contains(output, "x-envy:") {
-		t.Fatalf("expected meta section in generated env.yaml, got:\n%s", output)
+		t.Fatalf("expected meta section in generated compose.yaml, got:\n%s", output)
 	}
 }
 
 func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
-	m := &manifest.Manifest{
-		Services: []manifest.Service{{
+	m := &compose.Project{
+		Services: []compose.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
 			Sets:    []string{"worker"},
 		}},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"worker": {
-				Vars: []manifest.Var{{Key: "BROKER_URL"}},
+				Vars: []compose.Var{{Key: "BROKER_URL"}},
 			},
 		},
 	}
@@ -238,15 +238,15 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 }
 
 func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
-	m := &manifest.Manifest{
-		Services: []manifest.Service{{
+	m := &compose.Project{
+		Services: []compose.Service{{
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
 			Sets:    []string{"worker"},
 		}},
-		Sets: map[string]manifest.Set{
+		Sets: map[string]compose.Set{
 			"worker": {
-				Vars: []manifest.Var{{Key: "OTHER_VAR"}},
+				Vars: []compose.Var{{Key: "OTHER_VAR"}},
 			},
 		},
 	}

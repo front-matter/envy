@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
-	"github.com/front-matter/envy/manifest"
 	"github.com/front-matter/envy/reader"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -26,15 +26,15 @@ var (
 
 var importCmd = &cobra.Command{
 	Use:   "import [path]",
-	Short: "Import .env and/or compose.yaml files to generate env.yaml",
-	Long: `Import .env and/or Docker Compose configuration files and convert them into an env.yaml manifest.
+	Short: "Import .env and/or compose.yaml files to generate compose.yaml",
+	Long: `Import .env and/or Docker Compose configuration files and convert them into an compose.yaml compose.
 
 Auto-detection: If no files are specified, the command looks for .env, .env.example, compose.yaml,
 compose.yml, docker-compose.yaml, and docker-compose.yml in the current directory.
 If both files are found, they are merged into a single manifest with compose services and all variables.
 
 File paths: The --file flag can be either a folder or a file path ending in .yaml/.yml.
-- Folder: creates the folder if needed and writes to folder/env.yaml
+- Folder: creates the folder if needed and writes to folder/compose.yaml
 - File: .yaml/.yml file path, creates parent directories as needed
 
 Examples:
@@ -87,7 +87,7 @@ Examples:
 		}
 
 		// Import manifests
-		var manifests []*manifest.Manifest
+		var manifests []*compose.Project
 		for _, importPath := range filesToImport {
 			m, err := importFile(importPath)
 			if err != nil {
@@ -120,7 +120,7 @@ Examples:
 }
 
 // importFile detects file type and imports accordingly
-func importFile(path string) (*manifest.Manifest, error) {
+func importFile(path string) (*compose.Project, error) {
 	lower := strings.ToLower(path)
 	if strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".env.example") || strings.HasSuffix(lower, ".env.local") {
 		return reader.ImportEnvFile(path)
@@ -134,7 +134,7 @@ func importFile(path string) (*manifest.Manifest, error) {
 	return nil, fmt.Errorf("unsupported file type: %s (expected .env, .env.example, .env.local, compose.yaml, compose.yml, docker-compose.yaml, or docker-compose.yml)", path)
 }
 
-func importComposeFromURL(rawURL string) (*manifest.Manifest, error) {
+func importComposeFromURL(rawURL string) (*compose.Project, error) {
 	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("downloading %s: %w", rawURL, err)
@@ -182,7 +182,7 @@ func isHTTPURL(path string) bool {
 // resolvePath determines the final file path.
 // If the path ends with .yaml or .yml, it's used as the file path.
 // If the path is a folder (or doesn't have a yaml extension), it creates the folder
-// and returns path/env.yaml.
+// and returns path/compose.yaml.
 // Rejects any other file extensions.
 func resolvePath(path string) (string, error) {
 	lower := strings.ToLower(path)
@@ -211,7 +211,7 @@ func resolvePath(path string) (string, error) {
 		return "", fmt.Errorf("creating directory %s: %w", path, err)
 	}
 
-	return filepath.Join(path, "env.yaml"), nil
+	return filepath.Join(path, "compose.yaml"), nil
 }
 
 func FileExists(path string) (bool, error) {
@@ -300,11 +300,11 @@ func findImportFiles(dir string) ([]string, error) {
 
 func init() {
 	rootCmd.AddCommand(importCmd)
-	importCmd.Flags().StringVarP(&importFilePath, "file", "f", "env.yaml",
-		"File path: folder name (creates folder and writes env.yaml) or .yaml/.yml file path (creates parent folders as needed)")
+	importCmd.Flags().StringVarP(&importFilePath, "file", "f", "compose.yaml",
+		"File path: folder name (creates folder and writes compose.yaml) or .yaml/.yml file path (creates parent folders as needed)")
 }
 
-func verifyServiceCommandVarsDefined(m *manifest.Manifest) []string {
+func verifyServiceCommandVarsDefined(m *compose.Project) []string {
 	if m == nil {
 		return nil
 	}
@@ -353,20 +353,20 @@ func verifyServiceCommandVarsDefined(m *manifest.Manifest) []string {
 	return issues
 }
 
-// filterSecretVars removes vars marked as secret from sets before writing env.yaml.
-func filterSecretVars(m *manifest.Manifest) *manifest.Manifest {
+// filterSecretVars removes vars marked as secret from sets before writing compose.yaml.
+func filterSecretVars(m *compose.Project) *compose.Project {
 	if m == nil {
 		return nil
 	}
 
 	out := *m
-	out.Services = append([]manifest.Service(nil), m.Services...)
-	out.Volumes = append([]string(nil), m.Volumes...)
-	out.Networks = append([]string(nil), m.Networks...)
+	out.Services = append([]compose.Service(nil), m.Services...)
+	out.SetVolumeNames(append([]string(nil), m.VolumeNames()...))
+	out.SetNetworkNames(append([]string(nil), m.NetworkNames()...))
 
-	out.Sets = make(map[string]manifest.Set, len(m.Sets))
+	out.Sets = make(map[string]compose.Set, len(m.Sets))
 	for setKey, set := range m.Sets {
-		filteredVars := make([]manifest.Var, 0, len(set.Vars))
+		filteredVars := make([]compose.Var, 0, len(set.Vars))
 		for _, v := range set.Vars {
 			if v.IsSecret() {
 				continue
