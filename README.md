@@ -4,24 +4,14 @@
 
 # envy
 
-Envy is an environment variable manager for Docker. It manages `.env` and `compose.yaml` files via a structured
-`compose.yaml` manifest — with structure, documentation, validation, and secret auditing built in.
-All env variables are defined in the compose.yaml manifest, which generates .env files and compose.yaml files as needed. 
+Envy manages Docker Compose files. It validates and lints them,
+manages Compose profiles, audits secrets, generates and diffs .env files, and produces documentation that can be deployed as a static website.
 
 All env variables are always treated as strings to avoid type casting issues with Docker and environment variables in general. 
 
 ## Install
 
 Envy is a single Go binary, available for download from the [releases page](https://github.com/front-matter/envy/releases). Download the binary for your platform (Linux, Mac, Windows; X86 or ARM architecture), and place it in your PATH. Linux packages in deb, rpm and apk formats are also available from the releases page.
-
-### Homebrew
-
-To install envy on macOS using [Homebrew](https://brew.sh/), run:
-
-```bash
-brew tap front-matter/envy
-brew install envy
-```
 
 ### Go
 
@@ -50,10 +40,9 @@ envy [command] [flags]
 
 Commands:
   import      Import .env files and generate compose.yaml
+  validate    Validate a compose.yaml (using docker compose config)
   lint        Lint compose.yaml for warnings
-  diff        Show variables missing from or extra in a .env or
-              compose.yaml file
-  validate    Validate an .env or compose.yaml file against compose.yaml
+  diff        Show variables missing from or extra in a .env file
   generate    Generate a .env file from compose.yaml
   secrets     List or audit secret environment variables
   build       Generate documentation site for compose.yaml file

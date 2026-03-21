@@ -1,11 +1,9 @@
 # Envy configuration
 x-envy:
-  title: InvenioDRM Starter
+  title: Envy
   description: >
-    InvenioRDM is the open source turn-key research data management platform, 
-    with detailed documentation available [here](https://inveniordm.docs.cern.ch). 
-    InvenioRDM Starter facilitates deployment and configuration of InvenioRDM, 
-    allowing you to run InvenioRDM on your local computer within 15 min.
+    Envy is an environment variable manager for Docker. This website renders the automatic documentation
+    for the compose.yaml example file included with the GitHub repo.
   languageCode: en-US
   ignoreLogs:
     - warning-goldmark-raw-html
