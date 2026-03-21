@@ -17,12 +17,9 @@ Envy is a single Go binary, available for download from the [releases page](http
 
 To install envy using Go, run:
 
-
 ```bash
 go install github.com/front-matter/envy@latest
 ```
-
-Or download a binary from [Releases](https://github.com/front-matter/envy/releases).
 
 ### Homebrew
 
@@ -167,28 +164,6 @@ when set.
 | `readonly` | Prevent variable from being exported to generated `.env` when `"true"` (default: `"false"`) |
 | `example` | Example value shown in comments |
 
-## Installation
-
-Envy is a single Go binary, available for download from the [releases page](https://github.com/front-matter/envy/releases). Download the binary for your platform (Linux, Mac, Windows; X86 or ARM architecture), and place it in your PATH. Linux packages in deb, rpm and apk formats are also available from the releases page.
-
-### Homebrew
-
-To install envy on macOS using [Homebrew](https://brew.sh/), run:
-
-```bash
-brew tap front-matter/envy
-brew install envy
-```
-
-### Go
-
-To install envy using Go, run:
-
-```bash
-go install github.com/front-matter/envy@latest
-```
-
-
 ## Shell Completion
 
 `envy` provides completion scripts for bash, zsh, fish, and PowerShell via the built-in `completion` command.
@@ -225,4 +200,3 @@ envy completion powershell | Out-String | Invoke-Expression
 Please note that this project is released with a [Contributor Code of Conduct](https://github.com/front-matter/envy/blob/main/CODE_OF_CONDUCT.md). By participating in this project you agree to abide by its terms.
 
 License: [MIT](https://github.com/front-matter/envy/blob/main/LICENSE)
-
