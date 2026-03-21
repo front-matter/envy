@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,12 +23,11 @@ var (
 
 var importCmd = &cobra.Command{
 	Use:   "import [path]",
-	Short: "Import .env and/or compose.yaml files to generate compose.yaml",
-	Long: `Import .env and/or Docker Compose configuration files and convert them into an compose.yaml compose.
+	Short: "Import .env files to generate compose.yaml",
+	Long: `Import .env files and convert them into a compose.yaml compose.
 
-Auto-detection: If no files are specified, the command looks for .env, .env.example, compose.yaml,
-compose.yml, docker-compose.yaml, and docker-compose.yml in the current directory.
-If both files are found, they are merged into a single manifest with compose services and all variables.
+Auto-detection: If no files are specified, the command looks for .env and .env.example
+in the current directory.
 
 File paths: The --file flag can be either a folder or a file path ending in .yaml/.yml.
 - Folder: creates the folder if needed and writes to folder/compose.yaml
@@ -40,9 +36,7 @@ File paths: The --file flag can be either a folder or a file path ending in .yam
 Examples:
   envy import
 	  envy import .env
-	  envy import compose.yaml
 	  envy import ./config
-	  envy import compose.yaml --file ./generated
 	  envy import --file config/
 	  envy import --file config.yaml`,
 	Args: cobra.MaximumNArgs(1),
@@ -65,7 +59,7 @@ Examples:
 		}
 
 		if len(filesToImport) == 0 {
-			return fmt.Errorf("no import files found (tried auto-detection of .env, .env.example, compose.yaml, compose.yml, docker-compose.yaml, and docker-compose.yml)")
+			return fmt.Errorf("no import files found (tried auto-detection of .env and .env.example)")
 		}
 
 		// Do not overwrite existing files.
@@ -119,64 +113,13 @@ Examples:
 	},
 }
 
-// importFile detects file type and imports accordingly
+// importFile detects file type and imports accordingly.
 func importFile(path string) (*compose.Project, error) {
 	lower := strings.ToLower(path)
 	if strings.HasSuffix(lower, ".env") || strings.HasSuffix(lower, ".env.example") || strings.HasSuffix(lower, ".env.local") {
 		return reader.ImportEnvFile(path)
 	}
-	if strings.HasSuffix(lower, ".yaml") || strings.HasSuffix(lower, ".yml") {
-		if isHTTPURL(path) {
-			return importComposeFromURL(path)
-		}
-		return reader.ImportCompose(path)
-	}
-	return nil, fmt.Errorf("unsupported file type: %s (expected .env, .env.example, .env.local, compose.yaml, compose.yml, docker-compose.yaml, or docker-compose.yml)", path)
-}
-
-func importComposeFromURL(rawURL string) (*compose.Project, error) {
-	resp, err := http.Get(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("downloading %s: %w", rawURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("downloading %s: unexpected status %s", rawURL, resp.Status)
-	}
-
-	ext := ".yaml"
-	if strings.HasSuffix(strings.ToLower(rawURL), ".yml") {
-		ext = ".yml"
-	}
-
-	tmpFile, err := os.CreateTemp("", "envy-import-url-*"+ext)
-	if err != nil {
-		return nil, fmt.Errorf("creating temporary file for %s: %w", rawURL, err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
-		return nil, fmt.Errorf("reading %s: %w", rawURL, err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return nil, fmt.Errorf("closing temporary file for %s: %w", rawURL, err)
-	}
-
-	return reader.ImportCompose(tmpPath)
-}
-
-func isHTTPURL(path string) bool {
-	parsed, err := url.Parse(path)
-	if err != nil {
-		return false
-	}
-	if parsed == nil {
-		return false
-	}
-	return parsed.Scheme == "http" || parsed.Scheme == "https"
+	return nil, fmt.Errorf("unsupported file type: %s (expected .env, .env.example, or .env.local)", path)
 }
 
 // resolvePath determines the final file path.
@@ -231,18 +174,14 @@ func FileExists(path string) (bool, error) {
 }
 
 // resolveImportPaths determines which files to import.
-// If sourcePath is empty, auto-detects supported env and compose files in current directory.
-// If sourcePath is a directory, finds supported env and compose files within it.
+// If sourcePath is empty, auto-detects supported env files in current directory.
+// If sourcePath is a directory, finds supported env files within it.
 // If sourcePath is a file, imports that file.
 // Returns a deduplicated slice of file paths.
 func resolveImportPaths(sourcePath string) ([]string, error) {
 	if sourcePath == "" {
 		// Auto-detect in current directory
 		return autoDetectImportFiles(".")
-	}
-
-	if isHTTPURL(sourcePath) {
-		return []string{sourcePath}, nil
 	}
 
 	info, err := os.Stat(sourcePath)
@@ -257,7 +196,7 @@ func resolveImportPaths(sourcePath string) ([]string, error) {
 	return []string{sourcePath}, nil
 }
 
-// autoDetectImportFiles looks for supported env and compose files in a directory.
+// autoDetectImportFiles looks for supported env files in a directory.
 func autoDetectImportFiles(dir string) ([]string, error) {
 	return findImportFiles(dir)
 }
@@ -281,14 +220,6 @@ func findImportFiles(dir string) ([]string, error) {
 
 	envCandidates := []string{".env", ".env.example"}
 	for _, candidate := range envCandidates {
-		if actualName, ok := available[candidate]; ok {
-			result = append(result, filepath.Join(dir, actualName))
-			break
-		}
-	}
-
-	composeCandidates := []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
-	for _, candidate := range composeCandidates {
 		if actualName, ok := available[candidate]; ok {
 			result = append(result, filepath.Join(dir, actualName))
 			break

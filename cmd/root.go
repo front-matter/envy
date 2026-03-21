@@ -12,25 +12,23 @@ var manifestPath string
 var rootCmd = &cobra.Command{
 	Use:           "envy",
 	Version:       Version,
-	Short:         "Environment variable manager",
+	Short:         "Docker Compose manager",
 	SilenceErrors: true,
-	Long: `envy manages environment variables via a structured compose.yaml 
-compose. It generates .env files, validates configuration,
-produces documentation, and audits secrets.
+	Long: `envy manages Docker Compose files. It validates and lints them,
+manages Compose profiles, audits secrets, generates and diffs .env files, and 
+produces documentation that can be deployed as a static website. Example usage:
 
-	envy import
-	envy import compose.yaml --file ./generated
-	envy lint
-	envy diff .env.prod
-	envy compose
-	envy compose --flavor coolify --without-service db,cache
-	envy generate --no-secrets > .env.example
-	envy validate .env.prod
-	envy build --destination public
-	envy secrets --check
-	envy --version
-	envy server --bind 0.0.0.0
-	envy deploy --target production`,
+envy validate
+envy lint
+envy import
+envy export
+envy secrets
+envy generate --no-secrets > .env.example
+envy diff .env.prod
+envy build --destination public
+envy server --bind 0.0.0.0
+envy deploy --target production
+envy --version`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return ensureRequiredGitignoreEntries()
 	},

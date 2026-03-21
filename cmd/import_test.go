@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,10 +97,6 @@ func TestFindImportFilesOrder(t *testing.T) {
 	tmp := t.TempDir()
 
 	files := []string{
-		"compose.yml",
-		"docker-compose.yaml",
-		"docker-compose.yml",
-		"compose.yaml",
 		".env",
 		".env.example",
 	}
@@ -121,7 +115,6 @@ func TestFindImportFilesOrder(t *testing.T) {
 
 	want := []string{
 		filepath.Join(tmp, ".env"),
-		filepath.Join(tmp, "compose.yaml"),
 	}
 
 	if !reflect.DeepEqual(got, want) {
@@ -132,7 +125,7 @@ func TestFindImportFilesOrder(t *testing.T) {
 func TestFindImportFilesUsesEnvExampleWhenEnvMissing(t *testing.T) {
 	tmp := t.TempDir()
 
-	for _, name := range []string{".env.example", "docker-compose.yaml"} {
+	for _, name := range []string{".env.example"} {
 		path := filepath.Join(tmp, name)
 		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
 			t.Fatalf("writing %s: %v", name, err)
@@ -146,30 +139,8 @@ func TestFindImportFilesUsesEnvExampleWhenEnvMissing(t *testing.T) {
 
 	want := []string{
 		filepath.Join(tmp, ".env.example"),
-		filepath.Join(tmp, "docker-compose.yaml"),
 	}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("findImportFiles() = %v, want %v", got, want)
-	}
-}
-
-func TestFindImportFilesComposeFallbackOrder(t *testing.T) {
-	tmp := t.TempDir()
-
-	for _, name := range []string{"docker-compose.yml", "compose.yml"} {
-		path := filepath.Join(tmp, name)
-		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
-			t.Fatalf("writing %s: %v", name, err)
-		}
-	}
-
-	got, err := findImportFiles(tmp)
-	if err != nil {
-		t.Fatalf("findImportFiles: %v", err)
-	}
-
-	want := []string{filepath.Join(tmp, "compose.yml")}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("findImportFiles() = %v, want %v", got, want)
 	}
@@ -262,40 +233,5 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 	}
 	if !strings.Contains(message, "service \"worker\"") {
 		t.Fatalf("expected service name in warning, got %q", message)
-	}
-}
-
-func TestResolveImportPathsURL(t *testing.T) {
-	url := "https://example.org/compose.yaml"
-
-	got, err := resolveImportPaths(url)
-	if err != nil {
-		t.Fatalf("resolveImportPaths(url): %v", err)
-	}
-
-	want := []string{url}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("resolveImportPaths(url) = %v, want %v", got, want)
-	}
-}
-
-func TestImportFileFromYAMLURL(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/yaml")
-		_, _ = w.Write([]byte("services:\n  web:\n    image: nginx:latest\n"))
-	}))
-	defer server.Close()
-
-	m, err := importFile(server.URL + "/compose.yaml")
-	if err != nil {
-		t.Fatalf("importFile(url): %v", err)
-	}
-
-	if m == nil {
-		t.Fatalf("expected non-nil manifest")
-	}
-
-	if len(m.Services) != 1 || m.Services[0].Name != "web" {
-		t.Fatalf("expected one imported service named web, got %#v", m.Services)
 	}
 }

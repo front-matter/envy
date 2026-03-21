@@ -49,12 +49,11 @@ brew install envy
 envy [command] [flags]
 
 Commands:
-  import      Import .env and/or compose.yaml and generate compose.yaml
+  import      Import .env files and generate compose.yaml
   lint        Lint compose.yaml for warnings
   diff        Show variables missing from or extra in a .env or
               compose.yaml file
   validate    Validate an .env or compose.yaml file against compose.yaml
-  compose     Generate a Docker Compose file from compose.yaml
   generate    Generate a .env file from compose.yaml
   secrets     List or audit secret environment variables
   build       Generate documentation site for compose.yaml file
@@ -70,35 +69,24 @@ Global flags:
 ### Workflow
 
 ```bash
-# Import env and compose files into compose.yaml
+# Import env files into compose.yaml
 # Auto-detects one env file: .env preferred over .env.example
-# Auto-detects one compose file in this order: compose.yaml, compose.yml, docker-compose.yaml, docker-compose.yml
 envy import
 
 # Or import a specific file/directory via positional arg
 envy import .env
-envy import compose.yaml
 envy import ./config
 
 # --file accepts a folder and writes ./generated/compose.yaml
-envy import compose.yaml --file ./generated
+envy import .env --file ./generated
 
 # Safety: if target file already exists, import prints a warning and does not overwrite it
 
-# Lint manifest for non-fatal issues (e.g. unknown service sets)
+# Lint compose.yaml and run go-ruleguard checks
 envy lint
-
-# Lint Go code with go-ruleguard rules
-go tool ruleguard -rules rules/rules.go ./...
 
 # See what's missing or undocumented
 envy diff .env.prod
-
-# Generate Docker Compose from env defaults
-envy compose
-
-# Generate Docker Compose for Coolify
-envy compose --flavor coolify
 
 # Initial setup — generate a safe template to commit
 envy generate --no-secrets > .env.example

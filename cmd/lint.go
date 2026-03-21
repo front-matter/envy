@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -14,6 +15,12 @@ import (
 
 var lintFix bool
 
+var ruleguardRunner = func() (string, error) {
+	cmd := exec.Command("go", "tool", "ruleguard", "-rules", "rules/rules.go", "./...")
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
 var lintCmd = &cobra.Command{
 	Use:   "lint",
 	Short: "Lint compose.yaml for non-fatal configuration issues",
@@ -24,6 +31,8 @@ Examples:
   envy lint
   envy lint --manifest ./compose.yaml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ruleguardOutput, ruleguardErr := ruleguardRunner()
+
 		path, err := resolveManifest(manifestPath)
 		if err != nil {
 			return err
@@ -49,7 +58,7 @@ Examples:
 		}
 
 		issues := m.LintIssues()
-		if len(issues) == 0 {
+		if len(issues) == 0 && ruleguardErr == nil {
 			color.Green("No lint findings in %s", path)
 			return nil
 		}
@@ -65,20 +74,34 @@ Examples:
 			}
 		}
 
-		color.Yellow("%d lint finding(s) in %s (%d error(s), %d warning(s)):", len(issues), path, errorCount, warningCount)
-		for _, issue := range issues {
-			line := fmt.Sprintf("  - [%s] %s", issue.Rule, issue.Message)
-			if issue.Path != "" {
-				line = fmt.Sprintf("%s (%s)", line, issue.Path)
-			}
-			if issue.Level == "error" {
-				color.Red(line)
-			} else {
-				color.Yellow(line)
+		if len(issues) > 0 {
+			color.Yellow("%d lint finding(s) in %s (%d error(s), %d warning(s)):", len(issues), path, errorCount, warningCount)
+			for _, issue := range issues {
+				line := fmt.Sprintf("  - [%s] %s", issue.Rule, issue.Message)
+				if issue.Path != "" {
+					line = fmt.Sprintf("%s (%s)", line, issue.Path)
+				}
+				if issue.Level == "error" {
+					color.Red(line)
+				} else {
+					color.Yellow(line)
+				}
 			}
 		}
 
-		if errorCount > 0 {
+		if strings.TrimSpace(ruleguardOutput) != "" {
+			color.Yellow("ruleguard findings:")
+			fmt.Print(ruleguardOutput)
+			if !strings.HasSuffix(ruleguardOutput, "\n") {
+				fmt.Println()
+			}
+		}
+
+		if ruleguardErr != nil && strings.TrimSpace(ruleguardOutput) == "" {
+			color.Red("ruleguard failed: %v", ruleguardErr)
+		}
+
+		if errorCount > 0 || ruleguardErr != nil {
 			os.Exit(1)
 		}
 		return nil
