@@ -61,7 +61,7 @@ jobs:
           HUGO_ENVIRONMENT: production
           HUGO_ENV: production
         run: |
-          go run . build \
+          envy build \
             --gc --minify
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
