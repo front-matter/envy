@@ -612,3 +612,52 @@ func TestLintRejectsLatestTag(t *testing.T) {
 		t.Fatalf("expected unstable-tag lint issue, got %#v", issues)
 	}
 }
+
+func TestLintErrorsWhenSetIsUnusedByServices(t *testing.T) {
+	m := &Manifest{
+		Meta: Meta{Title: "Example"},
+		Services: []Service{{
+			Name:  "web",
+			Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
+			Sets:  []string{"app"},
+		}},
+		Sets: map[string]Set{
+			"app":    {},
+			"unused": {},
+		},
+	}
+
+	issues := m.LintIssues()
+	found := false
+	for _, issue := range issues {
+		if issue.Rule == "x-set-anchor-must-be-used" && issue.Level == "error" && issue.Path == "x-set-unused" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected unused set lint issue, got %#v", issues)
+	}
+}
+
+func TestLintDoesNotErrorWhenAllSetsAreUsed(t *testing.T) {
+	m := &Manifest{
+		Meta: Meta{Title: "Example"},
+		Services: []Service{{
+			Name:  "web",
+			Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
+			Sets:  []string{"app", "shared"},
+		}},
+		Sets: map[string]Set{
+			"app":    {},
+			"shared": {},
+		},
+	}
+
+	for _, issue := range m.LintIssues() {
+		if issue.Rule == "x-set-anchor-must-be-used" {
+			t.Fatalf("unexpected unused set lint issue: %#v", issue)
+		}
+	}
+}

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var requiredGitignoreEntries = []string{".env", "compose.yaml"}
+var requiredGitignoreEntries = []string{".env"}
 
 func ensureRequiredGitignoreEntries() error {
 	missing, err := missingRequiredGitignoreEntries(".", requiredGitignoreEntries)

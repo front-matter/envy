@@ -899,6 +899,7 @@ func (m *Manifest) Lint() []string {
 func (m *Manifest) LintIssues() []LintIssue {
 	var issues []LintIssue
 	seenServices := make(map[string]bool)
+	usedSets := make(map[string]bool)
 
 	if strings.TrimSpace(m.Meta.Title) == "" {
 		issues = append(issues, LintIssue{
@@ -980,6 +981,7 @@ func (m *Manifest) LintIssues() []LintIssue {
 		}
 
 		for _, setKey := range svc.Sets {
+			usedSets[setKey] = true
 			if _, ok := m.Sets[setKey]; !ok {
 				issues = append(issues, LintIssue{
 					Level:   "warning",
@@ -989,6 +991,18 @@ func (m *Manifest) LintIssues() []LintIssue {
 				})
 			}
 		}
+	}
+
+	for setKey := range m.Sets {
+		if usedSets[setKey] {
+			continue
+		}
+		issues = append(issues, LintIssue{
+			Level:   "error",
+			Rule:    "x-set-anchor-must-be-used",
+			Path:    fmt.Sprintf("x-set-%s", setKey),
+			Message: fmt.Sprintf("set %q is not referenced by any service", setKey),
+		})
 	}
 
 	return issues
