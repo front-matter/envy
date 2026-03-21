@@ -47,7 +47,7 @@ jobs:
         uses: actions/configure-pages@v4
       - name: Setup Envy
         run: |
-          wget -O ${{ runner.temp }}/envy.deb https://github.com/front-matter/envy/releases/download/v${ENVY_VERSION}/envy_${ENVY_VERSION}_linux_amd64.deb \
+          wget -O ${{ runner.temp }}/envy.deb https://github.com/front-matter/envy/releases/download/v${ENVY_VERSION}/envy_${ENVY_VERSION}_amd64.deb \
           && sudo dpkg -i ${{ runner.temp }}/envy.deb
       - name: Build with Envy
         env:
