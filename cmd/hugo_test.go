@@ -338,7 +338,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 		},
 	}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "https://github.com/front-matter/envy"); err != nil {
 		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
 	}
 
@@ -371,7 +371,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
 	}
 	mainMenu, ok := menu["main"].([]interface{})
-	if !ok || len(mainMenu) < 2 {
+	if !ok || len(mainMenu) < 3 {
 		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
 	}
 
@@ -397,5 +397,44 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	themeParams, ok := secondMenuItem["params"].(map[string]interface{})
 	if !ok || themeParams["type"] != "theme-toggle" {
 		t.Fatalf("expected second menu item params.type to be theme-toggle, got: %#v", secondMenuItem["params"])
+	}
+
+	thirdMenuItem, ok := mainMenu[2].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected third menu item to be map, got: %#v", mainMenu[2])
+	}
+	if thirdMenuItem["name"] != "GitHub" {
+		t.Fatalf("expected third config menu item to be GitHub, got: %#v", thirdMenuItem["name"])
+	}
+	if thirdMenuItem["url"] != "https://github.com/front-matter/envy" {
+		t.Fatalf("expected third menu item url to be repo URL, got: %#v", thirdMenuItem["url"])
+	}
+	githubParams, ok := thirdMenuItem["params"].(map[string]interface{})
+	if !ok || githubParams["icon"] != "github" {
+		t.Fatalf("expected third menu item params.icon to be github, got: %#v", thirdMenuItem["params"])
+	}
+}
+
+func TestNormalizeRepositoryURL(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "https", in: "https://github.com/front-matter/envy.git", want: "https://github.com/front-matter/envy"},
+		{name: "http", in: "http://github.com/front-matter/envy.git", want: "http://github.com/front-matter/envy"},
+		{name: "scp ssh", in: "git@github.com:front-matter/envy.git", want: "https://github.com/front-matter/envy"},
+		{name: "ssh url", in: "ssh://git@github.com/front-matter/envy.git", want: "https://github.com/front-matter/envy"},
+		{name: "unsupported", in: "file:///tmp/repo", want: ""},
+		{name: "empty", in: "", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeRepositoryURL(tc.in)
+			if got != tc.want {
+				t.Fatalf("normalizeRepositoryURL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

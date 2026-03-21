@@ -194,7 +194,9 @@ func prepareBuildAssets(path string) (string, error) {
 		return "", err
 	}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir); err != nil {
+	repoURL := detectRepositoryURL(manifestDir)
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, repoURL); err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
 	}
@@ -229,7 +231,7 @@ func extractDocsFS(dst string) error {
 	})
 }
 
-func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string) error {
+func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL string) error {
 	lookup := make(map[string]compose.Var)
 	for _, v := range m.AllVars() {
 		lookup[v.Key] = v
@@ -253,6 +255,18 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string) error {
 				},
 			},
 		},
+	}
+
+	if repoURL != "" {
+		menu := config["menu"].(map[string]interface{})
+		mainMenu := menu["main"].([]map[string]interface{})
+		mainMenu = append(mainMenu, map[string]interface{}{
+			"name":   "GitHub",
+			"url":    repoURL,
+			"weight": 120,
+			"params": map[string]string{"icon": "github"},
+		})
+		menu["main"] = mainMenu
 	}
 
 	if m.Meta.Docs != "" {
@@ -294,6 +308,52 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string) error {
 	}
 
 	return nil
+}
+
+func detectRepositoryURL(dir string) string {
+	cmd := exec.Command("git", "-C", dir, "config", "--get", "remote.origin.url")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		return ""
+	}
+
+	return normalizeRepositoryURL(url)
+}
+
+func normalizeRepositoryURL(raw string) string {
+	url := strings.TrimSpace(raw)
+	if url == "" {
+		return ""
+	}
+
+	url = strings.TrimSuffix(url, ".git")
+
+	if strings.HasPrefix(url, "git@") {
+		parts := strings.SplitN(strings.TrimPrefix(url, "git@"), ":", 2)
+		if len(parts) == 2 {
+			return "https://" + parts[0] + "/" + parts[1]
+		}
+	}
+
+	if strings.HasPrefix(url, "ssh://git@") {
+		trimmed := strings.TrimPrefix(url, "ssh://git@")
+		if i := strings.Index(trimmed, "/"); i > 0 {
+			host := trimmed[:i]
+			path := trimmed[i+1:]
+			return "https://" + host + "/" + path
+		}
+	}
+
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return url
+	}
+
+	return ""
 }
 
 func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error) {
