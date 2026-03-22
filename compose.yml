@@ -118,16 +118,24 @@ services:
   cache:
     image: valkey/valkey:7.2.5-bookworm
     command: [ "valkey-server", "--loglevel", "warning" ]
+  # Describes db service configuration.
   db:
     image: postgres:17.4-bookworm
+    profiles: [ dev, staging ]
     environment:
       <<: [ *db ]
+  # Describes proxy service configuration.
   proxy:
     image: caddy:2.10
+    profiles: [ dev, staging ]
+  # Describes search service configuration. For details see
+  # https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
   search:
     image: opensearchproject/opensearch:2.18.0
     environment:
       <<: [ *search ]
+
+  # Describes web service configuration.
   web:
     image: ghcr.io/front-matter/invenio-rdm-starter:latest
     platform: linux/amd64

@@ -1,0 +1,75 @@
+{{- /* Shortcode wrapper for card rendering. */ -}}
+{{- $image := .Get "image" -}}
+{{- $width := 0 -}}
+{{- $height := 0 -}}
+{{- $method := .Get "method" | default "Resize" | humanize -}}
+{{- $options := .Get "options" | default "800x webp q80" -}}
+{{- $process := .Get "process" | default (printf "%s %s" $method $options) -}}
+
+{{- if and $image (not (urls.Parse $image).Scheme) -}}
+  {{- with or (.Page.Resources.Get $image) (resources.Get $image) -}}
+    {{- if (not (eq .MediaType.SubType "svg")) -}}
+      {{- $processed := .Process $process -}}
+      {{- $width = $processed.Width -}}
+      {{- $height = $processed.Height -}}
+      {{- $image = $processed.RelPermalink -}}
+    {{- end -}}
+  {{- else -}}
+    {{- if hasPrefix $image "/" -}}
+      {{- $image = relURL (strings.TrimPrefix "/" $image) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- $isFirst := not (.Page.Scratch.Get "envy-card-first-rendered") -}}
+{{- if $isFirst -}}
+  {{- .Page.Scratch.Set "envy-card-first-rendered" true -}}
+{{- end -}}
+{{- $parentCols := "" -}}
+{{- with .Parent -}}{{- $parentCols = .Get "cols" -}}{{- end -}}
+
+{{- $description := .Get "description" -}}
+{{- $dockerImage := .Get "dockerImage" -}}
+{{- $command := .Get "command" -}}
+{{- $subtitleTag := .Get "subtitleTag" -}}
+{{- $descriptionLink := .Get "descriptionLink" -}}
+
+{{- partial "shortcodes/card.html" (dict
+  "isFirst"        (and $isFirst (eq $parentCols "1"))
+  "link"           (.Get "link")
+  "title"          (.Get "title")
+  "titleLink"      (.Get "titleLink")
+  "icon"           (.Get "icon")
+  "cardType"       (.Get "cardType")
+  "iconImage"      (.Get "iconImage")
+  "iconImageClass" (.Get "iconImageClass")
+  "iconAttributes" (.Get "iconAttributes")
+  "iconGapClass"   (.Get "iconGapClass")
+  "description"         $description
+  "dockerImage"         $dockerImage
+  "dockerImageLink"     (.Get "dockerImageLink")
+  "platform"            (.Get "platform")
+  "command"             $command
+  "subtitleTag"         $subtitleTag
+  "descriptionLink"     $descriptionLink
+  "image"          $image
+  "alt"            (.Get "alt")
+  "width"          $width
+  "height"         $height
+  "imageStyle"     (.Get "imageStyle")
+  "tag"            (.Get "tag")
+  "tagColor"       (or (.Get "tagColor") (.Get "tagType"))
+  "tagBorder"      (ne (.Get "tagBorder") "false")
+  "tagIcon"        (.Get "tagIcon")
+  "titleClass"     (.Get "titleClass")
+  "titlePadding"   (.Get "titlePadding")
+  "class"          (.Get "class")
+  "html"           (.Get "html")
+  "var"            (.Get "var")
+  "tagHTML"        (.Get "tagHTML")
+  "tags"           (.Get "tags")
+  "tagLinks"       (.Get "tagLinks")
+  "tagsServices"   (.Get "tagsServices")
+  "tagsProfiles"   (.Get "tagsProfiles")
+  "tagsSets"       (.Get "tagsSets")
+) -}}

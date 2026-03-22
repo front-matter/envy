@@ -362,6 +362,86 @@ func TestManifestLoadServiceScalarSet(t *testing.T) {
 	}
 }
 
+func TestManifestLoadServiceDescriptionFromComments(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  # Describes db service configuration.",
+		"  db:",
+		"    image: postgres:17.4-bookworm",
+		"    environment:",
+		"      POSTGRES_DB: app",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 1 {
+		t.Fatalf("expected one service, got %+v", m.Services)
+	}
+	if m.Services[0].Description != "Describes db service configuration." {
+		t.Fatalf("expected service description from comment, got %q", m.Services[0].Description)
+	}
+}
+
+func TestManifestLoadServiceDescriptionFromInterEntryComments(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  cache:",
+		"    image: valkey/valkey:7.2.5-bookworm",
+		"  # Describes db service configuration.",
+		"  # Additional line.",
+		"  db:",
+		"    image: postgres:17.4-bookworm",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 2 {
+		t.Fatalf("expected two services, got %+v", m.Services)
+	}
+	if m.Services[1].Name != "db" {
+		t.Fatalf("expected second service db, got %q", m.Services[1].Name)
+	}
+	if m.Services[1].Description != "Describes db service configuration. Additional line." {
+		t.Fatalf("expected multi-line service description from comments, got %q", m.Services[1].Description)
+	}
+}
+
+func TestManifestLoadServiceDescriptionFromCommentsWithStandaloneLink(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  # Describes search service configuration. For details see",
+		"  # https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/",
+		"  search:",
+		"    image: opensearchproject/opensearch:2.18.0",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 1 {
+		t.Fatalf("expected one service, got %+v", m.Services)
+	}
+
+	want := "Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/"
+	if m.Services[0].Description != want {
+		t.Fatalf("expected service description with standalone link preserved, got %q", m.Services[0].Description)
+	}
+}
+
 func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",
@@ -507,7 +587,7 @@ func TestManifestLoadSetLinkFromMarkdownReferenceComment(t *testing.T) {
 	if set.Description != "Shared settings" {
 		t.Fatalf("expected set description from comment, got %q", set.Description)
 	}
-	if set.Link != "[Base Docs]: https://example.org/base" {
+	if set.Link != "https://example.org/base" {
 		t.Fatalf("expected markdown reference-style link extraction, got %q", set.Link)
 	}
 }
@@ -540,6 +620,33 @@ func TestManifestLoadSetDescriptionAndLinkFromInterEntryComments(t *testing.T) {
 	}
 	if set.Link != "https://example.org/worker" {
 		t.Fatalf("expected set link from inter-entry comments, got %q", set.Link)
+	}
+}
+
+func TestManifestLoadSetLinkFromInlineCommentURL(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"# Search settings. For details see https://example.org/search/docs.",
+		"x-set-search: &search",
+		"  SEARCH_BACKEND:",
+		"    default: opensearch",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["search"]
+	if !ok {
+		t.Fatalf("expected search set")
+	}
+	if set.Description != "Search settings. For details see https://example.org/search/docs." {
+		t.Fatalf("expected set description from inline URL comment, got %q", set.Description)
+	}
+	if set.Link != "https://example.org/search/docs" {
+		t.Fatalf("expected set link extracted from inline URL comment, got %q", set.Link)
 	}
 }
 

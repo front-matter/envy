@@ -3,6 +3,7 @@ package compose
 
 import (
 	"fmt"
+	"go/doc/comment"
 	"os"
 	"regexp"
 	"sort"
@@ -58,6 +59,7 @@ type Service struct {
 	Platform    string   `yaml:"platform,omitempty"`
 	Entrypoint  []string `yaml:"entrypoint,omitempty"`
 	Command     []string `yaml:"command,omitempty"`
+	Profiles    []string `yaml:"profiles,omitempty"`
 	Description string   `yaml:"description,omitempty"`
 	Sets        []string `yaml:"-"`
 }
@@ -67,6 +69,7 @@ type serviceYAML struct {
 	Platform    string     `yaml:"platform,omitempty"`
 	Entrypoint  []string   `yaml:"entrypoint,omitempty"`
 	Command     *yaml.Node `yaml:"command,omitempty"`
+	Profiles    *yaml.Node `yaml:"profiles,omitempty"`
 	Description string     `yaml:"description,omitempty"`
 	Sets        *yaml.Node `yaml:"sets,omitempty"`
 }
@@ -354,6 +357,14 @@ func (s Service) MarshalYAML() (interface{}, error) {
 		out.Command = node
 	}
 
+	if len(s.Profiles) > 0 {
+		node := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
+		for _, item := range s.Profiles {
+			node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: item})
+		}
+		out.Profiles = node
+	}
+
 	if len(s.Sets) > 0 {
 		node := &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle}
 		for _, item := range s.Sets {
@@ -392,6 +403,12 @@ func (s *Service) UnmarshalYAML(node *yaml.Node) error {
 			if err := value.Decode(&out.Command); err != nil {
 				return err
 			}
+		case "profiles":
+			profiles, err := decodeStringSliceOrScalar(value)
+			if err != nil {
+				return err
+			}
+			out.Profiles = profiles
 		case "description":
 			if err := value.Decode(&out.Description); err != nil {
 				return err
@@ -662,9 +679,88 @@ func decodeServicesNode(node *yaml.Node) (Services, error) {
 			return nil, err
 		}
 		svc.Name = name
+		if strings.TrimSpace(svc.Description) == "" {
+			svc.Description = extractServiceDescriptionFromComments(node, i)
+		}
 		services = append(services, svc)
 	}
 	return services, nil
+}
+
+func parseServiceDescriptionFromComments(comments ...string) string {
+	var blocks []string
+	var currentParagraph []string
+
+	flushParagraph := func() {
+		if len(currentParagraph) == 0 {
+			return
+		}
+		blocks = append(blocks, strings.Join(currentParagraph, " "))
+		currentParagraph = nil
+	}
+
+	for _, raw := range comments {
+		for _, line := range strings.Split(raw, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+
+			clean := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+			if clean == "" {
+				flushParagraph()
+				continue
+			}
+
+			if plainLinkPattern.MatchString(clean) || markdownReferenceLinkPattern.MatchString(clean) {
+				flushParagraph()
+				blocks = append(blocks, clean)
+				continue
+			}
+
+			if matches := markdownLinkPattern.FindStringSubmatch(clean); len(matches) == 2 && matches[0] == clean {
+				flushParagraph()
+				blocks = append(blocks, clean)
+				continue
+			}
+
+			if matches := prefixedLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
+				flushParagraph()
+				blocks = append(blocks, matches[1])
+				continue
+			}
+
+			currentParagraph = append(currentParagraph, clean)
+		}
+	}
+
+	flushParagraph()
+
+	return strings.TrimSpace(strings.Join(blocks, "\n"))
+}
+
+func extractServiceDescriptionFromComments(root *yaml.Node, keyIndex int) string {
+	if root == nil || keyIndex < 0 || keyIndex+1 >= len(root.Content) {
+		return ""
+	}
+
+	keyNode := root.Content[keyIndex]
+	valueNode := root.Content[keyIndex+1]
+
+	comments := []string{
+		keyNode.HeadComment,
+		keyNode.LineComment,
+		valueNode.HeadComment,
+		valueNode.LineComment,
+	}
+
+	// Comments between mapping entries can be attached to the previous value node.
+	if keyIndex >= 2 {
+		prevValueNode := root.Content[keyIndex-1]
+		comments = append([]string{prevValueNode.FootComment}, comments...)
+	}
+
+	return parseServiceDescriptionFromComments(comments...)
 }
 
 func decodeSetsNode(node *yaml.Node) (map[string]Set, error) {
@@ -746,22 +842,13 @@ func parseSetMetadataFromComments(comments ...string) (string, string) {
 			}
 
 			if link == "" {
-				if matches := markdownLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
-					link = matches[1]
-					continue
+				if extracted := extractFirstCommentLink(clean); extracted != "" {
+					link = extracted
 				}
-				if markdownReferenceLinkPattern.MatchString(clean) {
-					link = clean
-					continue
-				}
-				if matches := prefixedLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
-					link = matches[1]
-					continue
-				}
-				if plainLinkPattern.MatchString(clean) {
-					link = clean
-					continue
-				}
+			}
+
+			if isSetCommentLinkOnlyLine(clean) {
+				continue
 			}
 
 			descriptionParts = append(descriptionParts, clean)
@@ -769,6 +856,54 @@ func parseSetMetadataFromComments(comments ...string) (string, string) {
 	}
 
 	return strings.TrimSpace(strings.Join(descriptionParts, " ")), link
+}
+
+func extractFirstCommentLink(text string) string {
+	var parser comment.Parser
+	doc := parser.Parse(text)
+
+	for _, block := range doc.Content {
+		paragraph, ok := block.(*comment.Paragraph)
+		if !ok {
+			continue
+		}
+		for _, item := range paragraph.Text {
+			link, ok := item.(*comment.Link)
+			if ok && strings.TrimSpace(link.URL) != "" {
+				return strings.TrimSpace(link.URL)
+			}
+		}
+	}
+
+	for _, def := range doc.Links {
+		if def != nil && strings.TrimSpace(def.URL) != "" {
+			return strings.TrimSpace(def.URL)
+		}
+	}
+
+	return ""
+}
+
+func isSetCommentLinkOnlyLine(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+
+	if plainLinkPattern.MatchString(trimmed) {
+		return true
+	}
+	if markdownReferenceLinkPattern.MatchString(trimmed) {
+		return true
+	}
+	if matches := prefixedLinkPattern.FindStringSubmatch(trimmed); len(matches) == 2 {
+		return true
+	}
+	if matches := markdownLinkPattern.FindStringSubmatch(trimmed); len(matches) == 2 && matches[0] == trimmed {
+		return true
+	}
+
+	return false
 }
 
 func extractSetMetadataFromComments(root *yaml.Node, keyIndex int) (string, string) {

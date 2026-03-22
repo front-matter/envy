@@ -41,9 +41,22 @@ func TestNormalizeSetDocLink(t *testing.T) {
 	}
 }
 
+func TestHasFlag(t *testing.T) {
+	args := []string{"--destination", "public", "--cleanDestinationDir", "--baseURL=https://example.org"}
+	if !hasFlag(args, "--cleanDestinationDir") {
+		t.Fatal("expected --cleanDestinationDir to be detected")
+	}
+	if !hasFlag(args, "--baseURL") {
+		t.Fatal("expected --baseURL=... to be detected")
+	}
+	if hasFlag(args, "--renderToMemory") {
+		t.Fatal("did not expect unrelated flag to be detected")
+	}
+}
+
 func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *testing.T) {
 	siteRoot := t.TempDir()
-	existingContentDir := filepath.Join(siteRoot, "content")
+	existingContentDir := filepath.Join(siteRoot, persistentContentDirName)
 	if err := os.MkdirAll(existingContentDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(content): %v", err)
 	}
@@ -64,14 +77,26 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			Image:    "caddy:2.10",
 			Platform: "linux/amd64",
 			Command:  []string{"caddy", "run", "--config", "/etc/caddy/Caddyfile"},
+			Profiles: []string{"public", "debug"},
 			Sets:     []string{"common"},
+		}, {
+			Name:        "api",
+			Image:       "nginx:1.27",
+			Description: "Internal API service.",
+		}, {
+			Name:        "worker",
+			Image:       "busybox:1.36",
+			Description: "Background worker.",
+			Profiles:    []string{"internal"},
 		}},
 		Sets: map[string]compose.Set{
 			"common": {
 				Description: "Shared settings for runtime services.",
 				Link:        "[Common Docs]: https://example.org/common",
 				Vars: []compose.Var{
+					{Key: "ZZZ_LAST", Default: "z", Example: "z-sample"},
 					{Key: "APP_ENV", Default: "production", Required: "true", Example: "staging"},
+					{Key: "TEST_SECRET_VAR", Default: "super-secret-value", Secret: "true"},
 					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
 				},
 			},
@@ -83,12 +108,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		t.Fatalf("prepareBuildContentDir(): %v", err)
 	}
 
-	aboutContent, err := os.ReadFile(filepath.Join(contentDir, "about.md"))
-	if err != nil {
-		t.Fatalf("ReadFile(about.md): %v", err)
-	}
-	if string(aboutContent) != "# About\n" {
-		t.Fatalf("expected copied content file, got %q", string(aboutContent))
+	if _, err := os.Stat(filepath.Join(contentDir, "about.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale content file to be removed during refresh, got: %v", err)
 	}
 
 	indexContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "_index.md"))
@@ -98,18 +119,14 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	if !strings.Contains(string(indexContent), "title=\"common\"") {
 		t.Fatalf("expected generated sets index to render a card for common, got:\n%s", string(indexContent))
 	}
-	if !strings.Contains(string(indexContent), "iconImage=\"/images/properties.svg\"") {
-		t.Fatalf("expected generated sets index to render properties.svg icon, got:\n%s", string(indexContent))
+	if !strings.Contains(string(indexContent), "cardType=\"set\"") {
+		t.Fatalf("expected generated sets index to render set shortcode icon, got:\n%s", string(indexContent))
 	}
 	indexChecks := []string{
 		"titleLink=\"/sets/common/\"",
-		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
-		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`<a href=\"https://example.org/common\" class=\"inline-flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-4 w-4\" /><span>Common Docs</span></a>`",
-		`tags="web"`,
-		`tagLinks="/services/#web"`,
-		`tagColor="red"`,
-		`tagBorder="false"`,
+		"description=`Shared settings for runtime services.`",
+		"descriptionLink=\"https://example.org/common\"",
+		"tagsServices=\"web\"",
 	}
 	for _, check := range indexChecks {
 		if !strings.Contains(string(indexContent), check) {
@@ -160,26 +177,17 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"Shared settings for runtime services.",
 		"https://example.org/common",
 		"title=\"APP_ENV\"",
+		"title=\"TEST_SECRET_VAR\"",
+		"cardType=\"var\"",
 		`<div id="app_env">`,
 		"title=\"common\"",
-		"iconImage=\"/images/properties.svg\"",
-		"iconImageClass=\"hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0\"",
-		"titleClass=\"hx:text-4xl md:hx:text-5xl hx:tracking-tight hx:pr-40 md:hx:pr-56\"",
+		"cardType=\"set\"",
 		"toc: false",
-		"subtitle=`Shared settings for runtime services.`",
-		"subtitle2=`<a href=\"https://example.org/common\" class=\"inline-flex items-center gap-2\"><img src=\"/images/readme.svg\" class=\"h-4 w-4\" /><span>Common Docs</span></a>`",
-		`tags="web"`,
-		`tagLinks="/services/#web"`,
-		`tagColor="red"`,
-		`tagBorder="false"`,
-		`titlePadding="hx:py-4 hx:px-4"`,
-		`data-editable="true"`,
-		`hx:mb-4`,
-		`hx:border-blue-200 hx:bg-blue-50/70`,
-		`contenteditable="true" spellcheck="false">production</code>`,
-		`data-editable="false"`,
-		`hx:border-yellow-200 hx:bg-yellow-50/80`,
-		`contenteditable="false" spellcheck="false">locked-value</code>`,
+		"description=`Shared settings for runtime services.`",
+		"descriptionLink=\"https://example.org/common\"",
+		"tagsServices=\"web\"",
+		`var="production"`,
+		`var="envy:readonly:locked-value"`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
@@ -188,6 +196,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	if strings.Contains(string(groupContent), "link=\"#app_env\"") {
 		t.Fatalf("expected generated set page variable cards to be non-clickable, got:\n%s", string(groupContent))
+	}
+	if strings.Contains(string(groupContent), "super-secret-value") {
+		t.Fatalf("expected generated set page to omit secret default values, got:\n%s", string(groupContent))
 	}
 
 	localizedSetsIndexContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "_index.de.md"))
@@ -212,7 +223,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	localizedGroupChecks := []string{
 		"Erforderlich",
 		"Beispiel: 'staging'",
-		`tag="Schreibgeschuetzt"`,
+		"descriptionLink=\"https://example.org/common\"",
+		"tagsServices=\"web\"",
+		`var="envy:readonly:locked-value"`,
 	}
 	for _, check := range localizedGroupChecks {
 		if !strings.Contains(string(localizedGroupContent), check) {
@@ -229,16 +242,15 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"hide: true",
 		"name: Services",
 		"title=\"web\"",
-		"titleLink=\"#web\"",
-		"titleClass=\"hx:pr-32 md:hx:pr-40\"",
-		"subtitle2=`**Image:** [caddy:2.10](https://hub.docker.com/_/caddy)`",
-		"subtitle3=`**Platform:** linux/amd64`",
-		"subtitle4=`**Command:**",
-		"caddy run --config /etc/caddy/Caddyfile",
-		`tags="common"`,
-		`tagLinks="/sets/common/"`,
-		`tagColor="blue"`,
-		`tagBorder="false"`,
+		"link=\"/services/web\"",
+		"cardType=\"service\"",
+		"dockerImage=\"caddy:2.10\"",
+		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
+		"platform=\"linux/amd64\"",
+		"command=\"[ \\\"caddy\\\", \\\"run\\\", \\\"--config\\\", \\\"/etc/caddy/Caddyfile\\\" ]\"",
+		"tagsSets=\"common\"",
+		"tagsProfiles=\"public,debug\"",
+		"[ \\\"caddy\\\", \\\"run\\\", \\\"--config\\\", \\\"/etc/caddy/Caddyfile\\\" ]",
 	}
 	for _, check := range servicesChecks {
 		if !strings.Contains(string(servicesIndexContent), check) {
@@ -253,8 +265,10 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	localizedServicesChecks := []string{
 		"title: Dienste",
 		"name: Dienste",
-		"subtitle3=`**Plattform:** linux/amd64`",
-		"subtitle4=`**Befehl:**",
+		"dockerImage=\"caddy:2.10\"",
+		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
+		"platform=\"linux/amd64\"",
+		"command=\"[ \\\"caddy\\\", \\\"run\\\", \\\"--config\\\", \\\"/etc/caddy/Caddyfile\\\" ]\"",
 	}
 	for _, check := range localizedServicesChecks {
 		if !strings.Contains(string(localizedServicesIndexContent), check) {
@@ -262,13 +276,177 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		}
 	}
 
+	profilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/_index.md): %v", err)
+	}
+	profilesChecks := []string{
+		"title: Profiles",
+		"description: Auto-generated profile reference from compose.yml.",
+		"title=\"none\"",
+		"title=\"debug\"",
+		"title=\"public\"",
+		"cardType=\"profile\"",
+		"link=\"/profiles/none/\"",
+		"link=\"/profiles/debug/\"",
+		"link=\"/profiles/public/\"",
+	}
+	for _, check := range profilesChecks {
+		if !strings.Contains(string(profilesIndexContent), check) {
+			t.Fatalf("expected generated profiles index to contain %q, got:\n%s", check, string(profilesIndexContent))
+		}
+	}
+
+	profileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "public.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/public.md): %v", err)
+	}
+	profileChecks := []string{
+		"title: public",
+		"hideTitle: true",
+		"toc: false",
+		"title=\"web\"",
+		"link=\"/services/web\"",
+		"dockerImage=\"caddy:2.10\"",
+		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
+		"platform=\"linux/amd64\"",
+	}
+	for _, check := range profileChecks {
+		if !strings.Contains(string(profileContent), check) {
+			t.Fatalf("expected generated profile page to contain %q, got:\n%s", check, string(profileContent))
+		}
+	}
+	if strings.Contains(string(profileContent), `link="/services/api"`) {
+		t.Fatalf("expected generated profile page to exclude services without profiles, got:\n%s", string(profileContent))
+	}
+	if strings.Contains(string(profileContent), `link="/services/worker"`) {
+		t.Fatalf("expected generated profile page to exclude services from other profiles, got:\n%s", string(profileContent))
+	}
+
+	noneProfileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "none.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/none.md): %v", err)
+	}
+	noneProfileChecks := []string{
+		"title: none",
+		"hideTitle: true",
+		"toc: false",
+		"title=\"api\"",
+		"link=\"/services/api\"",
+		"description=`Internal API service.`",
+		"dockerImage=\"nginx:1.27\"",
+		"dockerImageLink=\"https://hub.docker.com/_/nginx\"",
+	}
+	for _, check := range noneProfileChecks {
+		if !strings.Contains(string(noneProfileContent), check) {
+			t.Fatalf("expected generated none profile page to contain %q, got:\n%s", check, string(noneProfileContent))
+		}
+	}
+	if strings.Contains(string(noneProfileContent), `link="/services/web"`) {
+		t.Fatalf("expected generated none profile page to exclude profiled services, got:\n%s", string(noneProfileContent))
+	}
+	if strings.Contains(string(noneProfileContent), `link="/services/worker"`) {
+		t.Fatalf("expected generated none profile page to exclude services from other profiles, got:\n%s", string(noneProfileContent))
+	}
+
+	localizedProfilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/_index.de.md): %v", err)
+	}
+	localizedProfilesChecks := []string{
+		"title: Profile",
+		"description: Automatisch generierte Profilreferenz aus compose.yml.",
+		"title=\"none\"",
+	}
+	for _, check := range localizedProfilesChecks {
+		if !strings.Contains(string(localizedProfilesIndexContent), check) {
+			t.Fatalf("expected generated localized profiles index to contain %q, got:\n%s", check, string(localizedProfilesIndexContent))
+		}
+	}
+
+	localizedProfileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "public.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/public.de.md): %v", err)
+	}
+	localizedProfileChecks := []string{
+		"title: public",
+		"title=\"web\"",
+		"link=\"/services/web\"",
+	}
+	for _, check := range localizedProfileChecks {
+		if !strings.Contains(string(localizedProfileContent), check) {
+			t.Fatalf("expected generated localized profile page to contain %q, got:\n%s", check, string(localizedProfileContent))
+		}
+	}
+	if strings.Contains(string(localizedProfileContent), `link="/services/api"`) {
+		t.Fatalf("expected generated localized profile page to exclude services without profiles, got:\n%s", string(localizedProfileContent))
+	}
+
+	localizedNoneProfileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "none.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/none.de.md): %v", err)
+	}
+	localizedNoneProfileChecks := []string{
+		"title: none",
+		"title=\"api\"",
+		"link=\"/services/api\"",
+	}
+	for _, check := range localizedNoneProfileChecks {
+		if !strings.Contains(string(localizedNoneProfileContent), check) {
+			t.Fatalf("expected generated localized none profile page to contain %q, got:\n%s", check, string(localizedNoneProfileContent))
+		}
+	}
+
+	serviceContent, err := os.ReadFile(filepath.Join(contentDir, "services", "web.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(services/web.md): %v", err)
+	}
+	serviceChecks := []string{
+		"title: web",
+		"toc: false",
+		"title=\"web\"",
+		"tagsSets=\"common\"",
+		"tagsProfiles=\"public,debug\"",
+		"title=\"APP_ENV\"",
+		"cardType=\"var\"",
+		"title=\"TEST_SECRET_VAR\"",
+		"title=\"TEST_READONLY_VAR\"",
+		"title=\"ZZZ_LAST\"",
+	}
+	for _, check := range serviceChecks {
+		if !strings.Contains(string(serviceContent), check) {
+			t.Fatalf("expected generated service page to contain %q, got:\n%s", check, string(serviceContent))
+		}
+	}
+
+	appEnvPos := strings.Index(string(serviceContent), "title=\"APP_ENV\"")
+	readonlyPos := strings.Index(string(serviceContent), "title=\"TEST_READONLY_VAR\"")
+	zzzLastPos := strings.Index(string(serviceContent), "title=\"ZZZ_LAST\"")
+	if appEnvPos == -1 || readonlyPos == -1 || zzzLastPos == -1 {
+		t.Fatalf("expected APP_ENV, TEST_READONLY_VAR and ZZZ_LAST cards in service page, got:\n%s", string(serviceContent))
+	}
+	if !(appEnvPos < readonlyPos && readonlyPos < zzzLastPos) {
+		t.Fatalf("expected service vars sorted alphabetically, got order positions APP_ENV=%d TEST_READONLY_VAR=%d ZZZ_LAST=%d", appEnvPos, readonlyPos, zzzLastPos)
+	}
+	if strings.Contains(string(serviceContent), "super-secret-value") {
+		t.Fatalf("expected generated service page to omit secret default values, got:\n%s", string(serviceContent))
+	}
+
+	localizedServiceContent, err := os.ReadFile(filepath.Join(contentDir, "services", "web.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(services/web.de.md): %v", err)
+	}
+	if !strings.Contains(string(localizedServiceContent), "title=\"APP_ENV\"") {
+		t.Fatalf("expected localized generated service page to contain service vars, got:\n%s", string(localizedServiceContent))
+	}
+
 	if err := os.RemoveAll(contentDir); err != nil {
 		t.Fatalf("RemoveAll(contentDir): %v", err)
 	}
 }
-func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
+func TestPrepareBuildContentDirRefreshesExistingGroupPage(t *testing.T) {
 	siteRoot := t.TempDir()
-	groupDir := filepath.Join(siteRoot, "content", "sets")
+	groupDir := filepath.Join(siteRoot, persistentContentDirName, "sets")
 	if err := os.MkdirAll(groupDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(sets): %v", err)
 	}
@@ -292,11 +470,53 @@ func TestPrepareBuildContentDirKeepsExistingGroupPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(sets/common.md): %v", err)
 	}
-	if string(groupContent) != customPage {
-		t.Fatalf("expected existing set page to be preserved, got:\n%s", string(groupContent))
+	if string(groupContent) == customPage {
+		t.Fatalf("expected existing set page to be refreshed, got:\n%s", string(groupContent))
+	}
+	if !strings.Contains(string(groupContent), "Shared settings.") {
+		t.Fatalf("expected refreshed set page content, got:\n%s", string(groupContent))
 	}
 
 	if err := os.RemoveAll(contentDir); err != nil {
+		t.Fatalf("RemoveAll(contentDir): %v", err)
+	}
+}
+
+func TestPrepareBuildContentDirWithOptionsKeepsStaleFilesWhenRefreshDisabled(t *testing.T) {
+	siteRoot := t.TempDir()
+	contentDir := filepath.Join(siteRoot, persistentContentDirName)
+	if err := os.MkdirAll(contentDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(content): %v", err)
+	}
+	stalePath := filepath.Join(contentDir, "stale.md")
+	if err := os.WriteFile(stalePath, []byte("# stale\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stale.md): %v", err)
+	}
+
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
+		Sets: map[string]compose.Set{
+			"common": {Description: "Shared settings."},
+		},
+	}
+
+	generatedDir, err := prepareBuildContentDirWithOptions(siteRoot, m, false)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDirWithOptions(): %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Fatalf("expected stale file to remain when refresh is disabled, got: %v", err)
+	}
+
+	groupContent, err := os.ReadFile(filepath.Join(generatedDir, "sets", "common.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(sets/common.md): %v", err)
+	}
+	if !strings.Contains(string(groupContent), "Shared settings.") {
+		t.Fatalf("expected generated set page content, got:\n%s", string(groupContent))
+	}
+	if err := os.RemoveAll(generatedDir); err != nil {
 		t.Fatalf("RemoveAll(contentDir): %v", err)
 	}
 }
@@ -523,12 +743,20 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 		t.Fatalf("expected non-empty module.imports, got: %#v", module["imports"])
 	}
 
+	security, ok := got["security"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected security map in hugo config, got: %#v", got["security"])
+	}
+	if security["enableInlineShortcodes"] != true {
+		t.Fatalf("expected security.enableInlineShortcodes=true, got: %#v", security["enableInlineShortcodes"])
+	}
+
 	menu, ok := got["menu"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
 	}
 	mainMenu, ok := menu["main"].([]interface{})
-	if !ok || len(mainMenu) < 3 {
+	if !ok || len(mainMenu) < 5 {
 		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
 	}
 
@@ -536,39 +764,244 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected first menu item to be map, got: %#v", mainMenu[0])
 	}
-	if firstMenuItem["name"] != "Search" {
-		t.Fatalf("expected first config menu item to be Search, got: %#v", firstMenuItem["name"])
+	if firstMenuItem["name"] != "Hugo Example" {
+		t.Fatalf("expected first config menu item to be the site title, got: %#v", firstMenuItem["name"])
 	}
-	params, ok := firstMenuItem["params"].(map[string]interface{})
-	if !ok || params["type"] != "search" {
-		t.Fatalf("expected first menu item params.type to be search, got: %#v", firstMenuItem["params"])
+	if firstMenuItem["pageRef"] != "/" {
+		t.Fatalf("expected first menu item pageRef to be /, got: %#v", firstMenuItem["pageRef"])
 	}
 
 	secondMenuItem, ok := mainMenu[1].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected second menu item to be map, got: %#v", mainMenu[1])
 	}
-	if secondMenuItem["name"] != "Theme" {
-		t.Fatalf("expected second config menu item to be Theme, got: %#v", secondMenuItem["name"])
+	if secondMenuItem["name"] != "Profiles" {
+		t.Fatalf("expected second config menu item to be Profiles, got: %#v", secondMenuItem["name"])
 	}
-	themeParams, ok := secondMenuItem["params"].(map[string]interface{})
-	if !ok || themeParams["type"] != "theme-toggle" {
-		t.Fatalf("expected second menu item params.type to be theme-toggle, got: %#v", secondMenuItem["params"])
+	if secondMenuItem["pageRef"] != "/profiles" {
+		t.Fatalf("expected second menu item pageRef to be /profiles, got: %#v", secondMenuItem["pageRef"])
 	}
 
 	thirdMenuItem, ok := mainMenu[2].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected third menu item to be map, got: %#v", mainMenu[2])
 	}
-	if thirdMenuItem["name"] != "GitHub" {
-		t.Fatalf("expected third config menu item to be GitHub, got: %#v", thirdMenuItem["name"])
+	if thirdMenuItem["name"] != "Search" {
+		t.Fatalf("expected third config menu item to be Search, got: %#v", thirdMenuItem["name"])
 	}
-	if thirdMenuItem["url"] != "https://github.com/front-matter/envy" {
-		t.Fatalf("expected third menu item url to be repo URL, got: %#v", thirdMenuItem["url"])
+	params, ok := thirdMenuItem["params"].(map[string]interface{})
+	if !ok || params["type"] != "search" {
+		t.Fatalf("expected third menu item params.type to be search, got: %#v", thirdMenuItem["params"])
 	}
-	githubParams, ok := thirdMenuItem["params"].(map[string]interface{})
+
+	fourthMenuItem, ok := mainMenu[3].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected fourth menu item to be map, got: %#v", mainMenu[3])
+	}
+	if fourthMenuItem["name"] != "Theme" {
+		t.Fatalf("expected fourth config menu item to be Theme, got: %#v", fourthMenuItem["name"])
+	}
+	themeParams, ok := fourthMenuItem["params"].(map[string]interface{})
+	if !ok || themeParams["type"] != "theme-toggle" {
+		t.Fatalf("expected fourth menu item params.type to be theme-toggle, got: %#v", fourthMenuItem["params"])
+	}
+
+	fifthMenuItem, ok := mainMenu[4].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected fifth menu item to be map, got: %#v", mainMenu[4])
+	}
+	if fifthMenuItem["name"] != "GitHub" {
+		t.Fatalf("expected fifth config menu item to be GitHub, got: %#v", fifthMenuItem["name"])
+	}
+	if fifthMenuItem["url"] != "https://github.com/front-matter/envy" {
+		t.Fatalf("expected fifth menu item url to be repo URL, got: %#v", fifthMenuItem["url"])
+	}
+	githubParams, ok := fifthMenuItem["params"].(map[string]interface{})
 	if !ok || githubParams["icon"] != "github" {
-		t.Fatalf("expected third menu item params.icon to be github, got: %#v", thirdMenuItem["params"])
+		t.Fatalf("expected fifth menu item params.icon to be github, got: %#v", fifthMenuItem["params"])
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestIncludesProfilesMenuWhenProfilesExist(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &compose.Project{
+		Services: []compose.Service{{
+			Name:     "web",
+			Profiles: []string{"public"},
+		}},
+	}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	menu, ok := got["menu"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
+	}
+	mainMenu, ok := menu["main"].([]interface{})
+	if !ok || len(mainMenu) == 0 {
+		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
+	}
+
+	foundProfiles := false
+	for _, item := range mainMenu {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if entry["name"] == "Profiles" && entry["pageRef"] == "/profiles" {
+			foundProfiles = true
+			break
+		}
+	}
+	if !foundProfiles {
+		t.Fatalf("expected Profiles menu item with pageRef /profiles, got: %#v", menu["main"])
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestAlwaysIncludesProfilesMenu(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &compose.Project{}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	menu, ok := got["menu"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
+	}
+	mainMenu, ok := menu["main"].([]interface{})
+	if !ok || len(mainMenu) == 0 {
+		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
+	}
+
+	firstMenuItem, ok := mainMenu[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected first menu item to be map, got: %#v", mainMenu[0])
+	}
+	if firstMenuItem["name"] != "Profiles" || firstMenuItem["pageRef"] != "/profiles" {
+		t.Fatalf("expected first menu item to be Profiles with pageRef /profiles, got: %#v", firstMenuItem)
+	}
+}
+
+func TestPrepareBuildContentDirGeneratesProfilesIndexWhenNoProfilesExist(t *testing.T) {
+	siteRoot := t.TempDir()
+	m := &compose.Project{
+		Meta: compose.Meta{
+			HugoDefaultLanguage: "en",
+			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
+		},
+		Services: []compose.Service{{
+			Name:  "web",
+			Image: "caddy:2.10",
+		}},
+	}
+
+	contentDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+
+	profilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/_index.md): %v", err)
+	}
+	if !strings.Contains(string(profilesIndexContent), "No profiles have been defined.") {
+		t.Fatalf("expected generated profiles index to contain empty-state callout text, got:\n%s", string(profilesIndexContent))
+	}
+	if !strings.Contains(string(profilesIndexContent), `title="none"`) || !strings.Contains(string(profilesIndexContent), `link="/profiles/none/"`) {
+		t.Fatalf("expected generated profiles index to include none card, got:\n%s", string(profilesIndexContent))
+	}
+	if !strings.Contains(string(profilesIndexContent), `cardType="profile"`) {
+		t.Fatalf("expected generated profiles index cards to use profile shortcode icon, got:\n%s", string(profilesIndexContent))
+	}
+
+	noneProfileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "none.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/none.md): %v", err)
+	}
+	if !strings.Contains(string(noneProfileContent), `link="/services/web"`) {
+		t.Fatalf("expected none profile page to list services without profiles, got:\n%s", string(noneProfileContent))
+	}
+
+	localizedProfilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.de.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(profiles/_index.de.md): %v", err)
+	}
+	if !strings.Contains(string(localizedProfilesIndexContent), "Es wurden keine Profile definiert.") {
+		t.Fatalf("expected localized generated profiles index to contain empty-state callout text, got:\n%s", string(localizedProfilesIndexContent))
+	}
+	if !strings.Contains(string(localizedProfilesIndexContent), `title="none"`) || !strings.Contains(string(localizedProfilesIndexContent), `link="/profiles/none/"`) {
+		t.Fatalf("expected localized generated profiles index to include none card, got:\n%s", string(localizedProfilesIndexContent))
+	}
+	if !strings.Contains(string(localizedProfilesIndexContent), `cardType="profile"`) {
+		t.Fatalf("expected localized generated profiles index cards to use profile shortcode icon, got:\n%s", string(localizedProfilesIndexContent))
+	}
+}
+
+func TestPrepareBuildContentDirRefreshesExistingPersistentContent(t *testing.T) {
+	siteRoot := t.TempDir()
+	contentDir := filepath.Join(siteRoot, persistentContentDirName)
+	if err := os.MkdirAll(filepath.Join(contentDir, "profiles"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(profiles): %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(contentDir, ".envy-generated", "profiles"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(marker dir): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentDir, "legacy.md"), []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("WriteFile(legacy.md): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentDir, "legacy.md.envy-generated"), []byte("marker"), 0o644); err != nil {
+		t.Fatalf("WriteFile(legacy marker): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentDir, "profiles", "stale.md"), []byte("stale"), 0o644); err != nil {
+		t.Fatalf("WriteFile(stale.md): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentDir, ".envy-generated", "profiles", "stale.md.marker"), []byte("marker"), 0o644); err != nil {
+		t.Fatalf("WriteFile(hidden marker): %v", err)
+	}
+
+	m := &compose.Project{}
+	resultDir, err := prepareBuildContentDir(siteRoot, m)
+	if err != nil {
+		t.Fatalf("prepareBuildContentDir(): %v", err)
+	}
+	if resultDir != contentDir {
+		t.Fatalf("expected contentDir %q, got %q", contentDir, resultDir)
+	}
+	if _, err := os.Stat(filepath.Join(contentDir, "legacy.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale file to be removed, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(contentDir, "legacy.md.envy-generated")); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy marker file to be removed with full refresh, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(contentDir, "profiles", "stale.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale nested file to be removed, got: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(contentDir, ".envy-generated", "profiles", "stale.md.marker")); !os.IsNotExist(err) {
+		t.Fatalf("expected hidden marker directory to be removed with full refresh, got: %v", err)
 	}
 }
 
@@ -676,20 +1109,28 @@ func TestWriteTempHugoConfigFromManifestIncludesMultilanguage(t *testing.T) {
 		t.Fatalf("expected languages.de.menu map, got: %#v", deConfig["menu"])
 	}
 	deMainMenu, ok := deMenu["main"].([]interface{})
-	if !ok || len(deMainMenu) < 3 {
+	if !ok || len(deMainMenu) < 5 {
 		t.Fatalf("expected localized languages.de.menu.main, got: %#v", deMenu["main"])
 	}
 
 	deFirstMenuItem, ok := deMainMenu[0].(map[string]interface{})
-	if !ok || deFirstMenuItem["name"] != "Suche" {
-		t.Fatalf("expected first german menu item to be Suche, got: %#v", deMainMenu[0])
+	if !ok || deFirstMenuItem["name"] != "Example" {
+		t.Fatalf("expected first german menu item to be the site title, got: %#v", deMainMenu[0])
 	}
 	deSecondMenuItem, ok := deMainMenu[1].(map[string]interface{})
-	if !ok || deSecondMenuItem["name"] != "Design" {
-		t.Fatalf("expected second german menu item to be Design, got: %#v", deMainMenu[1])
+	if !ok || deSecondMenuItem["name"] != "Profile" {
+		t.Fatalf("expected second german menu item to be Profile, got: %#v", deMainMenu[1])
 	}
 	deThirdMenuItem, ok := deMainMenu[2].(map[string]interface{})
-	if !ok || deThirdMenuItem["name"] != "Sprache" {
-		t.Fatalf("expected third german menu item to be Sprache, got: %#v", deMainMenu[2])
+	if !ok || deThirdMenuItem["name"] != "Suche" {
+		t.Fatalf("expected third german menu item to be Suche, got: %#v", deMainMenu[2])
+	}
+	deFourthMenuItem, ok := deMainMenu[3].(map[string]interface{})
+	if !ok || deFourthMenuItem["name"] != "Design" {
+		t.Fatalf("expected fourth german menu item to be Design, got: %#v", deMainMenu[3])
+	}
+	deFifthMenuItem, ok := deMainMenu[4].(map[string]interface{})
+	if !ok || deFifthMenuItem["name"] != "Sprache" {
+		t.Fatalf("expected fifth german menu item to be Sprache, got: %#v", deMainMenu[4])
 	}
 }

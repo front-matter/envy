@@ -65,6 +65,7 @@ func init() {
 func runHugoCommand(subcommand string, args []string) error {
 	hugoArgs := make([]string, 0, len(args)+3)
 	hugoArgs = append(hugoArgs, subcommand)
+	refreshPersistentContent := subcommand == "build" && hasFlag(args, "--cleanDestinationDir")
 
 	buildSiteDir := ""
 	if usesGeneratedHugoSite(subcommand) {
@@ -77,7 +78,7 @@ func runHugoCommand(subcommand string, args []string) error {
 			return err
 		}
 
-		buildSiteDir, err = prepareBuildAssets(manifestFilePath)
+		buildSiteDir, err = prepareBuildAssets(manifestFilePath, refreshPersistentContent)
 		if err != nil {
 			return err
 		}
@@ -91,6 +92,9 @@ func runHugoCommand(subcommand string, args []string) error {
 
 	if subcommand == "build" {
 		hugoArgs = append(hugoArgs, "--destination", filepath.Join(cwd, "public"))
+		if !hasFlag(args, "--cleanDestinationDir") {
+			hugoArgs = append(hugoArgs, "--cleanDestinationDir")
+		}
 	}
 	hugoArgs = append(hugoArgs, args...)
 
@@ -152,6 +156,15 @@ func hasConfigFlag(args []string) bool {
 	return false
 }
 
+func hasFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveBuildManifestPath() (string, error) {
 	path, err := resolveManifest(manifestPath)
 	if err != nil {
@@ -168,7 +181,7 @@ func resolveBuildManifestPath() (string, error) {
 	return path, nil
 }
 
-func prepareBuildAssets(path string) (string, error) {
+func prepareBuildAssets(path string, refreshPersistentContent bool) (string, error) {
 	m, err := compose.Load(path)
 	if err != nil {
 		return "", err
@@ -193,12 +206,11 @@ func prepareBuildAssets(path string) (string, error) {
 		return "", fmt.Errorf("writing Hugo site go.mod: %w", err)
 	}
 
-	contentDir, err := prepareBuildContentDir(manifestDir, m)
+	contentDir, err := prepareBuildContentDirWithOptions(manifestDir, m, refreshPersistentContent)
 	if err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
 	}
-	defer os.RemoveAll(contentDir)
 
 	if err := copyDirIfExists(contentDir, filepath.Join(siteDir, "content")); err != nil {
 		os.RemoveAll(siteDir)
@@ -253,7 +265,11 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 	if defaultLanguage == "" {
 		defaultLanguage = "en"
 	}
-	menuMain := localizedMenuMain(defaultLanguage, repoURL, false)
+	menuTitle := strings.TrimSpace(hugoConfigValue(m.Meta.HugoTitle, lookup, "HUGO_TITLE"))
+	if menuTitle == "" {
+		menuTitle = strings.TrimSpace(m.Meta.Title)
+	}
+	menuMain := localizedMenuMain(defaultLanguage, repoURL, menuTitle, false)
 
 	config := map[string]interface{}{
 		"module": map[string]interface{}{
@@ -261,6 +277,9 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 		},
 		"menu": map[string]interface{}{
 			"main": menuMain,
+		},
+		"security": map[string]interface{}{
+			"enableInlineShortcodes": true,
 		},
 	}
 
@@ -285,11 +304,11 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 			return fmt.Errorf("parsing HUGO_LANGUAGES: %w", err)
 		}
 		includeLanguageSwitch := len(languages) > 1
-		config["languages"] = localizedLanguagesConfig(languages, repoURL, includeLanguageSwitch)
+		config["languages"] = localizedLanguagesConfig(languages, repoURL, menuTitle, includeLanguageSwitch)
 
 		if includeLanguageSwitch {
 			config["menu"] = map[string]interface{}{
-				"main": localizedMenuMain(defaultLanguage, repoURL, true),
+				"main": localizedMenuMain(defaultLanguage, repoURL, menuTitle, true),
 			}
 		}
 	}
@@ -299,9 +318,18 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 		config["title"] = m.Meta.Title
 	}
 
-	if description := strings.TrimSpace(m.Meta.HugoParamsDescription); description != "" {
-		config["params"] = map[string]interface{}{"description": description}
+	params := map[string]interface{}{
+		"navbar": map[string]interface{}{
+			"displayTitle": false,
+			"logo": map[string]interface{}{
+				"path": "images/logo.svg",
+			},
+		},
 	}
+	if description := strings.TrimSpace(m.Meta.HugoParamsDescription); description != "" {
+		params["description"] = description
+	}
+	config["params"] = params
 
 	if len(m.Meta.HugoIgnoreLogs) > 0 {
 		config["ignoreLogs"] = m.Meta.HugoIgnoreLogs
@@ -431,8 +459,23 @@ func translationCandidates(language string) []string {
 	return candidates
 }
 
-func localizedMenuMain(language, repoURL string, includeLanguageSwitch bool) []map[string]interface{} {
-	mainMenu := []map[string]interface{}{
+func localizedMenuMain(language, repoURL, title string, includeLanguageSwitch bool) []map[string]interface{} {
+	var mainMenu []map[string]interface{}
+
+	if strings.TrimSpace(title) != "" {
+		mainMenu = append(mainMenu, map[string]interface{}{
+			"name":    strings.TrimSpace(title),
+			"pageRef": "/",
+			"weight":  1,
+		})
+	}
+
+	mainMenu = append(mainMenu, []map[string]interface{}{
+		{
+			"name":    localizedString(language, "profiles", "Profiles"),
+			"pageRef": "/profiles",
+			"weight":  4,
+		},
 		{
 			"name":   localizedString(language, "search", "Search"),
 			"weight": 100,
@@ -443,8 +486,7 @@ func localizedMenuMain(language, repoURL string, includeLanguageSwitch bool) []m
 			"weight": 110,
 			"params": map[string]string{"type": "theme-toggle"},
 		},
-	}
-
+	}...)
 	if includeLanguageSwitch {
 		mainMenu = append(mainMenu, map[string]interface{}{
 			"name":   localizedString(language, "language", "Language"),
@@ -465,7 +507,7 @@ func localizedMenuMain(language, repoURL string, includeLanguageSwitch bool) []m
 	return mainMenu
 }
 
-func localizedLanguagesConfig(languages map[string]interface{}, repoURL string, includeLanguageSwitch bool) map[string]interface{} {
+func localizedLanguagesConfig(languages map[string]interface{}, repoURL, title string, includeLanguageSwitch bool) map[string]interface{} {
 	localized := make(map[string]interface{}, len(languages))
 	for language, rawConfig := range languages {
 		entry, ok := rawConfig.(map[string]interface{})
@@ -479,7 +521,7 @@ func localizedLanguagesConfig(languages map[string]interface{}, repoURL string, 
 			clone[key] = value
 		}
 		clone["menu"] = map[string]interface{}{
-			"main": localizedMenuMain(language, repoURL, includeLanguageSwitch),
+			"main": localizedMenuMain(language, repoURL, title, includeLanguageSwitch),
 		}
 		localized[language] = clone
 	}
@@ -537,10 +579,18 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "services", "Dienste")
 		case "servicesDescription":
 			return localizedString(language, "generatedServicesDescription", "Automatisch generierte Dienstreferenz aus compose.yml.")
+		case "profilesTitle":
+			return localizedString(language, "profiles", "Profile")
+		case "profilesDescription":
+			return localizedString(language, "generatedProfilesDescription", "Automatisch generierte Profilreferenz aus compose.yml.")
+		case "profileNoVariables":
+			return localizedString(language, "profileNoVariables", "Es wurden keine Profile definiert.")
 		case "setDescriptionFallback":
 			return localizedString(language, "setConfiguration", "Set-Konfiguration")
 		case "setNoVariables":
 			return localizedString(language, "setNoVariables", "Dieses Set definiert keine Variablen.")
+		case "serviceNoVariables":
+			return localizedString(language, "serviceNoVariables", "Dieser Dienst hat keine definierten Variablen.")
 		case "required":
 			return localizedString(language, "required", "Erforderlich")
 		case "defaultHidden":
@@ -557,6 +607,8 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "platform", "Plattform")
 		case "command":
 			return localizedString(language, "command", "Befehl")
+		case "readme":
+			return localizedString(language, "readme", "Mehr Info")
 		}
 	default:
 		switch key {
@@ -568,10 +620,18 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "services", "Services")
 		case "servicesDescription":
 			return localizedString(language, "generatedServicesDescription", "Auto-generated service reference from compose.yml.")
+		case "profilesTitle":
+			return localizedString(language, "profiles", "Profiles")
+		case "profilesDescription":
+			return localizedString(language, "generatedProfilesDescription", "Auto-generated profile reference from compose.yml.")
+		case "profileNoVariables":
+			return localizedString(language, "profileNoVariables", "No profiles have been defined.")
 		case "setDescriptionFallback":
 			return localizedString(language, "setConfiguration", "Set configuration")
 		case "setNoVariables":
 			return localizedString(language, "setNoVariables", "This set does not define variables.")
+		case "serviceNoVariables":
+			return localizedString(language, "serviceNoVariables", "This service has no defined variables.")
 		case "required":
 			return localizedString(language, "required", "Required")
 		case "defaultHidden":
@@ -588,6 +648,8 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "platform", "Platform")
 		case "command":
 			return localizedString(language, "command", "Command")
+		case "readme":
+			return localizedString(language, "readme", "More info")
 		}
 	}
 
@@ -640,141 +702,163 @@ func normalizeRepositoryURL(raw string) string {
 	return ""
 }
 
+const persistentContentDirName = ".envy"
+
 func prepareBuildContentDir(siteRoot string, m *compose.Project) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "envy-hugo-content-*")
-	if err != nil {
-		return "", fmt.Errorf("creating temporary Hugo content directory: %w", err)
+	return prepareBuildContentDirWithOptions(siteRoot, m, true)
+}
+
+func prepareBuildContentDirWithOptions(siteRoot string, m *compose.Project, refresh bool) (string, error) {
+	contentDir := filepath.Join(siteRoot, persistentContentDirName)
+	if err := os.MkdirAll(contentDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating persistent Hugo content directory: %w", err)
+	}
+	if refresh {
+		if err := refreshPersistentContentDir(contentDir); err != nil {
+			return "", err
+		}
 	}
 
 	defaultLanguage, additionalLanguages, err := generatedPageLanguages(m)
 	if err != nil {
-		os.RemoveAll(tmpDir)
 		return "", err
 	}
 
-	sourceContentDir := filepath.Join(siteRoot, "content")
-	if err := copyDirIfExists(sourceContentDir, tmpDir); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", err
-	}
-
-	if err := copyLocalizedReadmeIfMissing(siteRoot, filepath.Join(tmpDir, "_index.md"), defaultLanguage); err != nil {
-		os.RemoveAll(tmpDir)
+	if err := writeLocalizedHomePage(siteRoot, filepath.Join(contentDir, "_index.md"), defaultLanguage, generateHomeMarkdown(m)); err != nil {
 		return "", err
 	}
 	for _, language := range additionalLanguages {
-		if err := copyLocalizedReadmeIfMissing(siteRoot, filepath.Join(tmpDir, "_index."+language+".md"), language); err != nil {
-			os.RemoveAll(tmpDir)
+		if err := writeLocalizedHomePage(siteRoot, filepath.Join(contentDir, "_index."+language+".md"), language, generateHomeMarkdown(m)); err != nil {
 			return "", err
 		}
 	}
 
-	setsDir := filepath.Join(tmpDir, "sets")
+	setsDir := filepath.Join(contentDir, "sets")
 	if err := os.MkdirAll(setsDir, 0o755); err != nil {
-		os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("creating generated sets directory: %w", err)
 	}
 
-	if err := writeFileIfMissing(filepath.Join(tmpDir, "_index.md"), generateHomeMarkdown(m)); err != nil {
-		os.RemoveAll(tmpDir)
+	if err := writeGeneratedFile(contentDir, filepath.Join(setsDir, "_index.md"), generateSetsIndexMarkdown(m, defaultLanguage)); err != nil {
 		return "", err
 	}
 	for _, language := range additionalLanguages {
-		if err := writeFileIfMissing(filepath.Join(tmpDir, "_index."+language+".md"), generateHomeMarkdown(m)); err != nil {
-			os.RemoveAll(tmpDir)
-			return "", err
-		}
-	}
-
-	if err := writeFileIfMissing(filepath.Join(setsDir, "_index.md"), generateSetsIndexMarkdown(m, defaultLanguage)); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", err
-	}
-	for _, language := range additionalLanguages {
-		if err := writeFileIfMissing(filepath.Join(setsDir, "_index."+language+".md"), generateSetsIndexMarkdown(m, language)); err != nil {
-			os.RemoveAll(tmpDir)
+		if err := writeGeneratedFile(contentDir, filepath.Join(setsDir, "_index."+language+".md"), generateSetsIndexMarkdown(m, language)); err != nil {
 			return "", err
 		}
 	}
 
 	for _, set := range m.OrderedSets() {
 		pagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+".md")
-		if err := writeFileIfMissing(pagePath, generateSetMarkdown(m, set, defaultLanguage)); err != nil {
-			os.RemoveAll(tmpDir)
+		if err := writeGeneratedFile(contentDir, pagePath, generateSetMarkdown(m, set, defaultLanguage)); err != nil {
 			return "", err
 		}
 		for _, language := range additionalLanguages {
 			localizedPagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+"."+language+".md")
-			if err := writeFileIfMissing(localizedPagePath, generateSetMarkdown(m, set, language)); err != nil {
-				os.RemoveAll(tmpDir)
+			if err := writeGeneratedFile(contentDir, localizedPagePath, generateSetMarkdown(m, set, language)); err != nil {
 				return "", err
 			}
 		}
 	}
 
 	if len(m.Services) > 0 {
-		servicesDir := filepath.Join(tmpDir, "services")
+		servicesDir := filepath.Join(contentDir, "services")
 		if err := os.MkdirAll(servicesDir, 0o755); err != nil {
-			os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("creating generated services directory: %w", err)
 		}
-		if err := writeFileIfMissing(filepath.Join(servicesDir, "_index.md"), generateServicesIndexMarkdown(m, defaultLanguage)); err != nil {
-			os.RemoveAll(tmpDir)
+		if err := writeGeneratedFile(contentDir, filepath.Join(servicesDir, "_index.md"), generateServicesIndexMarkdown(m, defaultLanguage)); err != nil {
 			return "", err
 		}
 		for _, language := range additionalLanguages {
-			if err := writeFileIfMissing(filepath.Join(servicesDir, "_index."+language+".md"), generateServicesIndexMarkdown(m, language)); err != nil {
-				os.RemoveAll(tmpDir)
+			if err := writeGeneratedFile(contentDir, filepath.Join(servicesDir, "_index."+language+".md"), generateServicesIndexMarkdown(m, language)); err != nil {
+				return "", err
+			}
+		}
+
+		for _, service := range m.Services {
+			pagePath := filepath.Join(servicesDir, sanitizeServicePageName(service.Name)+".md")
+			if err := writeGeneratedFile(contentDir, pagePath, generateServiceMarkdown(m, service, defaultLanguage)); err != nil {
+				return "", err
+			}
+			for _, language := range additionalLanguages {
+				localizedPagePath := filepath.Join(servicesDir, sanitizeServicePageName(service.Name)+"."+language+".md")
+				if err := writeGeneratedFile(contentDir, localizedPagePath, generateServiceMarkdown(m, service, language)); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
+
+	profilesDir := filepath.Join(contentDir, "profiles")
+	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating generated profiles directory: %w", err)
+	}
+	if err := writeGeneratedFile(contentDir, filepath.Join(profilesDir, "_index.md"), generateProfilesIndexMarkdown(m, defaultLanguage)); err != nil {
+		return "", err
+	}
+	for _, language := range additionalLanguages {
+		if err := writeGeneratedFile(contentDir, filepath.Join(profilesDir, "_index."+language+".md"), generateProfilesIndexMarkdown(m, language)); err != nil {
+			return "", err
+		}
+	}
+
+	profiles := append([]string{"none"}, projectProfiles(m)...)
+	for _, profile := range profiles {
+		if strings.TrimSpace(profile) == "" {
+			continue
+		}
+		pagePath := filepath.Join(profilesDir, sanitizeProfilePageName(profile)+".md")
+		if err := writeGeneratedFile(contentDir, pagePath, generateProfileMarkdown(m, profile, defaultLanguage)); err != nil {
+			return "", err
+		}
+		for _, language := range additionalLanguages {
+			localizedPagePath := filepath.Join(profilesDir, sanitizeProfilePageName(profile)+"."+language+".md")
+			if err := writeGeneratedFile(contentDir, localizedPagePath, generateProfileMarkdown(m, profile, language)); err != nil {
 				return "", err
 			}
 		}
 	}
 
-	return tmpDir, nil
+	return contentDir, nil
 }
 
-func copyFileIfExists(src, dst string) error {
-	info, err := os.Stat(src)
+func refreshPersistentContentDir(contentDir string) error {
+	entries, err := os.ReadDir(contentDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		return fmt.Errorf("reading persistent Hugo content directory %s: %w", contentDir, err)
+	}
+
+	for _, entry := range entries {
+		if entry.Name() == ".gitkeep" {
+			continue
 		}
-		return fmt.Errorf("checking file %s: %w", src, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("file path %s is a directory", src)
+
+		targetPath := filepath.Join(contentDir, entry.Name())
+		if err := os.RemoveAll(targetPath); err != nil {
+			return fmt.Errorf("removing stale Hugo content %s: %w", targetPath, err)
+		}
 	}
 
-	return copyFile(src, dst)
+	return nil
 }
 
-func copyFileIfMissing(src, dst string) error {
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking destination file %s: %w", dst, err)
-	}
-
-	return copyFileIfExists(src, dst)
-}
-
-func copyLocalizedReadmeIfMissing(siteRoot, dst, language string) error {
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking destination file %s: %w", dst, err)
-	}
-
+func writeLocalizedHomePage(siteRoot, dst, language, fallback string) error {
 	if language != "" {
 		localizedReadme := filepath.Join(siteRoot, "README."+language+".md")
 		if _, err := os.Stat(localizedReadme); err == nil {
 			return copyFile(localizedReadme, dst)
-		} else if err != nil && !os.IsNotExist(err) {
+		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("checking localized README %s: %w", localizedReadme, err)
 		}
 	}
 
-	return copyFileIfExists(filepath.Join(siteRoot, "README.md"), dst)
+	defaultReadme := filepath.Join(siteRoot, "README.md")
+	if _, err := os.Stat(defaultReadme); err == nil {
+		return copyFile(defaultReadme, dst)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking default README %s: %w", defaultReadme, err)
+	}
+
+	return writeGeneratedFile("", dst, fallback)
 }
 
 func copyDirIfExists(src, dst string) error {
@@ -840,13 +924,7 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-func writeFileIfMissing(path, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("checking generated page path %s: %w", path, err)
-	}
-
+func writeGeneratedFile(contentDir, path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("creating page parent directory for %s: %w", path, err)
 	}
@@ -921,9 +999,96 @@ func generateServicesIndexMarkdown(m *compose.Project, language string) string {
 	}))
 	body.WriteString(renderCardsOpen(2))
 	for _, service := range m.Services {
-		body.WriteString(renderServiceCard(service, language))
+		body.WriteString(renderServiceOverviewCard(service, language))
 	}
 	body.WriteString(renderCardsClose())
+	return body.String()
+}
+
+func generateProfilesIndexMarkdown(m *compose.Project, language string) string {
+	var body strings.Builder
+	title := generatedPageString(language, "profilesTitle")
+	body.WriteString(frontMatterMarkdown(map[string]interface{}{
+		"title":       title,
+		"description": generatedPageString(language, "profilesDescription"),
+		"weight":      6,
+		"sidebar": map[string]interface{}{
+			"hide": true,
+		},
+	}))
+
+	profiles := projectProfiles(m)
+	if len(profiles) == 0 {
+		body.WriteString(renderInfoCallout(generatedPageString(language, "profileNoVariables")))
+	}
+
+	body.WriteString(renderCardsOpen(3))
+	body.WriteString(renderProfileCard("none", "/profiles/none/"))
+	for _, profile := range profiles {
+		if strings.TrimSpace(profile) == "none" {
+			continue
+		}
+		body.WriteString(renderProfileCard(profile, "/profiles/"+sanitizeProfilePageName(profile)+"/"))
+	}
+	body.WriteString(renderCardsClose())
+	return body.String()
+}
+
+func generateProfileMarkdown(m *compose.Project, profile, language string) string {
+	var body strings.Builder
+	body.WriteString(frontMatterMarkdown(map[string]interface{}{
+		"title":     profile,
+		"weight":    profileWeight(m, profile),
+		"hideTitle": true,
+		"toc":       false,
+	}))
+
+	services := servicesForProfile(m, profile)
+	if strings.TrimSpace(profile) == "none" {
+		services = servicesWithoutProfiles(m)
+	}
+	if len(services) == 0 {
+		return body.String()
+	}
+
+	body.WriteString(renderCardsOpen(2))
+	for _, service := range services {
+		body.WriteString(renderServiceOverviewCard(service, language))
+	}
+	body.WriteString(renderCardsClose())
+	return body.String()
+}
+
+func generateServiceMarkdown(m *compose.Project, service compose.Service, language string) string {
+	var body strings.Builder
+	metaDescription := strings.Join(strings.Fields(strings.TrimSpace(service.Description)), " ")
+	body.WriteString(frontMatterMarkdown(map[string]interface{}{
+		"title":       service.Name,
+		"description": metaDescription,
+		"weight":      serviceWeight(m, service.Name),
+		"hideTitle":   true,
+		"toc":         false,
+	}))
+
+	body.WriteString(renderCardsOpen(1))
+	body.WriteString(renderServiceDetailCard(service, language))
+	body.WriteString(renderCardsClose())
+	body.WriteString("\n")
+
+	vars := varsForServiceSorted(m, service)
+	if len(vars) == 0 {
+		body.WriteString(renderInfoCallout(generatedPageString(language, "serviceNoVariables")))
+		return body.String()
+	}
+
+	for _, variable := range vars {
+		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
+		body.WriteString(renderCardsOpen(1))
+		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable)))
+		body.WriteString(renderCardsClose())
+		body.WriteString("\n")
+	}
+
 	return body.String()
 }
 
@@ -945,15 +1110,13 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 	body.WriteString("\n")
 
 	if len(set.Vars) == 0 {
-		body.WriteString(generatedPageString(language, "setNoVariables") + "\n")
+		body.WriteString(renderInfoCallout(generatedPageString(language, "setNoVariables")))
 		return body.String()
 	}
 	for _, variable := range set.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		tag, tagColor, tagBorder := variableCardTag(variable, language)
-		varClass := variableCardClass(variable)
-		body.WriteString(renderCardWithTag(variable.Key, "", "env", variableCardSubtitle(variable, language), variableCardHTML(variable), "hx:py-4 hx:px-4", tag, tagColor, tagBorder, varClass))
+		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable)))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
@@ -961,60 +1124,134 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 	return body.String()
 }
 
-func renderServiceCard(service compose.Service, language string) string {
+func renderServiceOverviewCard(service compose.Service, language string) string {
+	return renderServiceCard(service, language, "/services/"+sanitizeServicePageName(service.Name))
+}
+
+func renderServiceDetailCard(service compose.Service, language string) string {
+	return renderServiceCard(service, language, "")
+}
+
+func renderServiceCard(service compose.Service, language string, titleLink string) string {
 	var sb strings.Builder
-	titleClass := ""
-	if len(service.Sets) > 0 {
-		titleClass = "hx:pr-32 md:hx:pr-40"
-	}
-	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"#%s\" icon=\"%s\"",
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\"",
 		escapeShortcodeValue(service.Name),
-		escapeShortcodeValue(service.Name),
-		"serverless",
 	))
+	if strings.TrimSpace(titleLink) != "" {
+		sb.WriteString(fmt.Sprintf(" link=\"%s\"", escapeShortcodeValue(titleLink)))
+	}
+	sb.WriteString(" cardType=\"service\"")
 
 	if description := strings.TrimSpace(service.Description); description != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
 
 	if strings.TrimSpace(service.Image) != "" {
 		imageValue := strings.TrimSpace(service.Image)
+		sb.WriteString(fmt.Sprintf(" dockerImage=\"%s\"", escapeShortcodeValue(imageValue)))
 		imageLink := imageLink(imageValue)
 		if imageLink != "" {
-			sb.WriteString(fmt.Sprintf(" subtitle2=`**%s:** [%s](%s)`", escapeShortcodeRawValue(generatedPageString(language, "image")), escapeShortcodeRawValue(imageValue), escapeShortcodeRawValue(imageLink)))
-		} else {
-			sb.WriteString(fmt.Sprintf(" subtitle2=`**%s:** %s`", escapeShortcodeRawValue(generatedPageString(language, "image")), escapeShortcodeRawValue(imageValue)))
+			sb.WriteString(fmt.Sprintf(" dockerImageLink=\"%s\"", escapeShortcodeValue(imageLink)))
 		}
 	}
 
 	if platform := strings.TrimSpace(service.Platform); platform != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle3=`**%s:** %s`", escapeShortcodeRawValue(generatedPageString(language, "platform")), escapeShortcodeRawValue(platform)))
+		sb.WriteString(fmt.Sprintf(" platform=\"%s\"", escapeShortcodeValue(platform)))
 	}
 
 	if len(service.Command) > 0 {
-		indentedCommand := "**" + generatedPageString(language, "command") + ":**\n\n    " + wrapCommandArgs(service.Command, 60, "    ")
-		sb.WriteString(fmt.Sprintf(" subtitle4=`%s`", escapeShortcodeRawValue(indentedCommand)))
+		rawCommand := composeCommandLiteral(service.Command)
+		sb.WriteString(fmt.Sprintf(" command=\"%s\"", escapeShortcodeValue(rawCommand)))
 	}
 
-	if len(service.Sets) > 0 {
-		setTags := make([]string, len(service.Sets))
-		setTagLinks := make([]string, len(service.Sets))
-		for i, setKey := range service.Sets {
-			setTags[i] = setKey
-			setTagLinks[i] = "/sets/" + sanitizeSetPageName(setKey) + "/"
-		}
-		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="blue" tagBorder="false"`,
-			escapeShortcodeValue(strings.Join(setTags, ",")),
-			escapeShortcodeValue(strings.Join(setTagLinks, ",")),
-		))
+	if setsValue := csvAttributeValues(service.Sets); setsValue != "" {
+		sb.WriteString(fmt.Sprintf(" tagsSets=\"%s\"", escapeShortcodeValue(setsValue)))
 	}
 
-	if titleClass != "" {
-		sb.WriteString(fmt.Sprintf(" titleClass=\"%s\"", escapeShortcodeValue(titleClass)))
+	if profilesValue := csvAttributeValues(service.Profiles); profilesValue != "" {
+		sb.WriteString(fmt.Sprintf(" tagsProfiles=\"%s\"", escapeShortcodeValue(profilesValue)))
 	}
 
 	sb.WriteString(" >}}\n")
 	return sb.String()
+}
+
+func csvAttributeValues(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	cleaned := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		cleaned = append(cleaned, trimmed)
+	}
+
+	if len(cleaned) == 0 {
+		return ""
+	}
+
+	return strings.Join(cleaned, ",")
+}
+
+func renderServiceSetsBadges(service compose.Service) string {
+	if len(service.Sets) == 0 {
+		return ""
+	}
+
+	badges := make([]string, 0, len(service.Sets))
+	seenSets := make(map[string]struct{}, len(service.Sets))
+	for _, setKey := range service.Sets {
+		trimmedSet := strings.TrimSpace(setKey)
+		if trimmedSet == "" {
+			continue
+		}
+		if _, exists := seenSets[trimmedSet]; exists {
+			continue
+		}
+		seenSets[trimmedSet] = struct{}{}
+		badges = append(badges, renderLinkedHextraBadgeHTMLWithSize(trimmedSet, "/sets/"+sanitizeSetPageName(trimmedSet)+"/", "blue", false, "hx:text-xs"))
+	}
+
+	if len(badges) == 0 {
+		return ""
+	}
+
+	return `<div class="not-prose hx:flex hx:flex-wrap hx:gap-2 hx:mb-4">` + strings.Join(badges, "") + `</div>`
+}
+
+func renderServiceProfilesBadges(service compose.Service) string {
+	if len(service.Profiles) == 0 {
+		return ""
+	}
+
+	badges := make([]string, 0, len(service.Profiles))
+	seenProfiles := make(map[string]struct{}, len(service.Profiles))
+	for _, profile := range service.Profiles {
+		trimmedProfile := strings.TrimSpace(profile)
+		if trimmedProfile == "" {
+			continue
+		}
+		if _, exists := seenProfiles[trimmedProfile]; exists {
+			continue
+		}
+		seenProfiles[trimmedProfile] = struct{}{}
+		badges = append(badges, renderLinkedHextraBadgeHTMLWithSize(trimmedProfile, "/profiles/", "green", false, "hx:text-xs"))
+	}
+
+	if len(badges) == 0 {
+		return ""
+	}
+
+	return `<div class="not-prose hx:flex hx:flex-wrap hx:gap-2 hx:mb-4">` + strings.Join(badges, "") + `</div>`
 }
 
 // imageLink generates a public registry URL for the given image reference.
@@ -1053,38 +1290,20 @@ func imageLink(image string) string {
 	return ""
 }
 
-// wrapCommandArgs joins args into a shell command string, wrapping at maxWidth
-// characters using backslash line continuation with the given continuation indent.
-func wrapCommandArgs(args []string, maxWidth int, indent string) string {
+// composeCommandLiteral formats a Docker Compose list-form command value.
+// Example: [ "valkey-server", "--loglevel", "warning" ]
+func composeCommandLiteral(args []string) string {
 	if len(args) == 0 {
 		return ""
 	}
-	joined := strings.Join(args, " ")
-	if len(joined) <= maxWidth {
-		return joined
+	formatted := make([]string, 0, len(args))
+	for _, arg := range args {
+		escapedArg := strings.ReplaceAll(arg, "\\", "\\\\")
+		escapedArg = strings.ReplaceAll(escapedArg, "\"", "\\\"")
+		formatted = append(formatted, fmt.Sprintf("\"%s\"", escapedArg))
 	}
-	// Build wrapped output: first arg starts the line, subsequent args are added
-	// until the line would exceed maxWidth, then a continuation is inserted.
-	var sb strings.Builder
-	lineLen := 0
-	for i, arg := range args {
-		if i == 0 {
-			sb.WriteString(arg)
-			lineLen = len(arg)
-		} else {
-			if lineLen+1+len(arg) > maxWidth {
-				sb.WriteString(" \\\n")
-				sb.WriteString(indent)
-				sb.WriteString(arg)
-				lineLen = len(indent) + len(arg)
-			} else {
-				sb.WriteString(" ")
-				sb.WriteString(arg)
-				lineLen += 1 + len(arg)
-			}
-		}
-	}
-	return sb.String()
+
+	return "[ " + strings.Join(formatted, ", ") + " ]"
 }
 
 func frontMatterMarkdown(values map[string]interface{}) string {
@@ -1100,6 +1319,16 @@ func sanitizeSetPageName(setKey string) string {
 	return replacer.Replace(setKey)
 }
 
+func sanitizeServicePageName(serviceName string) string {
+	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-")
+	return replacer.Replace(serviceName)
+}
+
+func sanitizeProfilePageName(profileName string) string {
+	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-")
+	return replacer.Replace(profileName)
+}
+
 func setWeight(m *compose.Project, setKey string) int {
 	for index, set := range m.OrderedSets() {
 		if set.Key == setKey {
@@ -1107,6 +1336,73 @@ func setWeight(m *compose.Project, setKey string) int {
 		}
 	}
 	return 999
+}
+
+func serviceWeight(m *compose.Project, serviceName string) int {
+	for index, service := range m.Services {
+		if service.Name == serviceName {
+			return index + 1
+		}
+	}
+	return 999
+}
+
+func profileWeight(m *compose.Project, profileName string) int {
+	if strings.TrimSpace(profileName) == "none" {
+		return 1
+	}
+	for index, profile := range projectProfiles(m) {
+		if profile == profileName {
+			return index + 2
+		}
+	}
+	return 999
+}
+
+func varsForServiceSorted(m *compose.Project, service compose.Service) []compose.Var {
+	vars := make([]compose.Var, 0)
+	for _, setKey := range service.Sets {
+		set, ok := m.Sets[setKey]
+		if !ok {
+			continue
+		}
+		vars = append(vars, set.Vars...)
+	}
+
+	sort.SliceStable(vars, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(vars[i].Key))
+		right := strings.ToLower(strings.TrimSpace(vars[j].Key))
+		if left == right {
+			return vars[i].Key < vars[j].Key
+		}
+		return left < right
+	})
+
+	return vars
+}
+
+func projectProfiles(m *compose.Project) []string {
+	if m == nil || len(m.Services) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	for _, service := range m.Services {
+		for _, profile := range service.Profiles {
+			trimmed := strings.TrimSpace(profile)
+			if trimmed == "" {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+		}
+	}
+
+	profiles := make([]string, 0, len(seen))
+	for profile := range seen {
+		profiles = append(profiles, profile)
+	}
+	sort.Strings(profiles)
+	return profiles
 }
 
 func defaultString(value, fallback string) string {
@@ -1124,19 +1420,45 @@ func renderCardsClose() string {
 	return "{{< /cards >}}\n"
 }
 
+func renderInfoCallout(message string) string {
+	trimmed := strings.TrimSpace(message)
+	if trimmed == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("{{< callout type=\"info\" >}}\n%s\n{{< /callout >}}\n", trimmed)
+}
+
 func renderCard(title, link, icon, description string) string {
 	return renderCardWithTag(title, link, icon, description, "", "", "", "", "", "")
 }
 
-func renderCardWithTag(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class string) string {
+func renderProfileCard(title, link string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{< card link=\"%s\" title=\"%s\" icon=\"%s\"",
+	sb.WriteString(fmt.Sprintf("{{< card link=\"%s\" title=\"%s\" cardType=\"profile\" >}}\n",
 		escapeShortcodeValue(link),
 		escapeShortcodeValue(title),
-		escapeShortcodeValue(icon),
 	))
+	return sb.String()
+}
+
+func renderCardWithTag(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class string) string {
+	return renderCardWithTagIconOptions(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class, "", "")
+}
+
+func renderCardWithTagIconOptions(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class, iconAttributes, iconGapClass string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("{{< card link=\"%s\" title=\"%s\"",
+		escapeShortcodeValue(link),
+		escapeShortcodeValue(title),
+	))
+	if icon == "profile" || icon == "service" || icon == "set" || icon == "var" {
+		sb.WriteString(fmt.Sprintf(" cardType=\"%s\"", escapeShortcodeValue(icon)))
+	} else if icon != "" {
+		sb.WriteString(fmt.Sprintf(" icon=\"%s\"", escapeShortcodeValue(icon)))
+	}
 	if strings.TrimSpace(description) != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
 	if strings.TrimSpace(htmlContent) != "" {
 		sb.WriteString(fmt.Sprintf(" html=`%s`", escapeShortcodeRawValue(htmlContent)))
@@ -1156,6 +1478,12 @@ func renderCardWithTag(title, link, icon, description, htmlContent, titlePadding
 	if class != "" {
 		sb.WriteString(fmt.Sprintf(" class=\"%s\"", escapeShortcodeValue(class)))
 	}
+	if iconAttributes != "" {
+		sb.WriteString(fmt.Sprintf(" iconAttributes=\"%s\"", escapeShortcodeValue(iconAttributes)))
+	}
+	if iconGapClass != "" {
+		sb.WriteString(fmt.Sprintf(" iconGapClass=\"%s\"", escapeShortcodeValue(iconGapClass)))
+	}
 	sb.WriteString(" >}}\n")
 	return sb.String()
 }
@@ -1170,41 +1498,23 @@ func escapeShortcodeRawValue(value string) string {
 
 func renderSetCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
-	titleClass := "hx:text-4xl md:hx:text-5xl hx:tracking-tight"
-	if len(services) > 0 {
-		titleClass += " hx:pr-40 md:hx:pr-56"
-	}
-	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\" titleClass=\"%s\"",
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" cardType=\"set\"",
 		escapeShortcodeValue(set.Key),
-		escapeShortcodeValue("/images/properties.svg"),
-		escapeShortcodeValue("hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0"),
-		escapeShortcodeValue(titleClass),
 	))
 
-	// Add description as subtitle
+	// Add description.
 	if strings.TrimSpace(set.Description) != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description))))
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description))))
 	}
 
-	// Add documentation link as subtitle2.
+	// Add documentation link.
 	if strings.TrimSpace(set.Link) != "" {
-		linkLabel, linkTarget := normalizeSetDocLink(set.Link)
-		sb.WriteString(fmt.Sprintf(` subtitle2=`+"`"+`<a href="%s" class="inline-flex items-center gap-2"><img src="/images/readme.svg" class="h-4 w-4" /><span>%s</span></a>`+"`",
-			escapeShortcodeRawValue(linkTarget), escapeShortcodeRawValue(linkLabel)))
+		_, linkTarget := normalizeSetDocLink(set.Link)
+		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(linkTarget)))
 	}
 
-	// Add services tags in the card tag area
-	if len(services) > 0 {
-		serviceTags := make([]string, len(services))
-		serviceTagLinks := make([]string, len(services))
-		for i, service := range services {
-			serviceTags[i] = service
-			serviceTagLinks[i] = "/services/#" + service
-		}
-		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="red" tagBorder="false"`,
-			escapeShortcodeValue(strings.Join(serviceTags, ",")),
-			escapeShortcodeValue(strings.Join(serviceTagLinks, ",")),
-		))
+	if servicesValue := csvAttributeValues(services); servicesValue != "" {
+		sb.WriteString(fmt.Sprintf(" tagsServices=\"%s\"", escapeShortcodeValue(servicesValue)))
 	}
 
 	sb.WriteString(" >}}\n")
@@ -1213,35 +1523,23 @@ func renderSetCard(set compose.Set, services []string, language string) string {
 
 func renderSetOverviewCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" iconImage=\"%s\" iconImageClass=\"%s\"",
+	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" cardType=\"set\"",
 		escapeShortcodeValue(set.Key),
 		escapeShortcodeValue("/sets/"+sanitizeSetPageName(set.Key)+"/"),
-		escapeShortcodeValue("/images/properties.svg"),
-		escapeShortcodeValue("hx:h-8 hx:w-8 md:h-10 md:w-10 hx:shrink-0"),
 	))
 
 	description := strings.TrimSpace(defaultString(set.Description, generatedPageString(language, "setDescriptionFallback")))
 	if description != "" {
-		sb.WriteString(fmt.Sprintf(" subtitle=`%s`", escapeShortcodeRawValue(description)))
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
 
 	if strings.TrimSpace(set.Link) != "" {
-		linkLabel, linkTarget := normalizeSetDocLink(set.Link)
-		sb.WriteString(fmt.Sprintf(` subtitle2=`+"`"+`<a href="%s" class="inline-flex items-center gap-2"><img src="/images/readme.svg" class="h-4 w-4" /><span>%s</span></a>`+"`",
-			escapeShortcodeRawValue(linkTarget), escapeShortcodeRawValue(linkLabel)))
+		_, linkTarget := normalizeSetDocLink(set.Link)
+		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(linkTarget)))
 	}
 
-	if len(services) > 0 {
-		serviceTags := make([]string, len(services))
-		serviceTagLinks := make([]string, len(services))
-		for i, service := range services {
-			serviceTags[i] = service
-			serviceTagLinks[i] = "/services/#" + service
-		}
-		sb.WriteString(fmt.Sprintf(` tags="%s" tagLinks="%s" tagColor="red" tagBorder="false"`,
-			escapeShortcodeValue(strings.Join(serviceTags, ",")),
-			escapeShortcodeValue(strings.Join(serviceTagLinks, ",")),
-		))
+	if servicesValue := csvAttributeValues(services); servicesValue != "" {
+		sb.WriteString(fmt.Sprintf(" tagsServices=\"%s\"", escapeShortcodeValue(servicesValue)))
 	}
 
 	sb.WriteString(" >}}\n")
@@ -1249,16 +1547,24 @@ func renderSetOverviewCard(set compose.Set, services []string, language string) 
 }
 
 func renderLinkedHextraBadgeHTML(label, href, color string, border bool) string {
+	return renderLinkedHextraBadgeHTMLWithSize(label, href, color, border, "hx:text-[.65rem]")
+}
+
+func renderLinkedHextraBadgeHTMLWithSize(label, href, color string, border bool, sizeClass string) string {
 	badgeClass := hextraBadgeColorClass(color)
 	borderClass := ""
 	if border {
 		borderClass = "hx:border "
 	}
+	if strings.TrimSpace(sizeClass) == "" {
+		sizeClass = "hx:text-[.65rem]"
+	}
 
 	return fmt.Sprintf(
-		"<a href=\"%s\" title=\"%s\" class=\"not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline\"><div class=\"hextra-badge\"><div class=\"hx:inline-flex hx:gap-1 hx:items-center hx:rounded-full hx:px-2.5 hx:leading-6 hx:text-[.65rem] %s%s\">%s</div></div></a>",
+		"<a href=\"%s\" title=\"%s\" class=\"not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline\"><div class=\"hextra-badge\"><div class=\"hx:inline-flex hx:gap-1 hx:items-center hx:rounded-full hx:px-2.5 hx:leading-6 %s %s%s\">%s</div></div></a>",
 		html.EscapeString(href),
 		html.EscapeString(label),
+		sizeClass,
 		borderClass,
 		badgeClass,
 		html.EscapeString(label),
@@ -1324,6 +1630,29 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
+func renderVarCard(variable compose.Var, description, class string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("{{< card link=\"\" title=\"%s\" cardType=\"var\"",
+		escapeShortcodeValue(variable.Key),
+	))
+	if strings.TrimSpace(description) != "" {
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
+	}
+	defaultValue := strings.TrimSpace(variable.DefaultString())
+	if !variable.IsSecret() && defaultValue != "" {
+		if variable.IsReadonly() {
+			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue("envy:readonly:"+defaultValue)))
+		} else {
+			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue(defaultValue)))
+		}
+	}
+	if class != "" {
+		sb.WriteString(fmt.Sprintf(" class=\"%s\"", escapeShortcodeValue(class)))
+	}
+	sb.WriteString(" >}}\n")
+	return sb.String()
+}
+
 func variableCardTag(variable compose.Var, language string) (string, string, string) {
 	if variable.IsSecret() {
 		return generatedPageString(language, "secret"), "orange", "false"
@@ -1335,14 +1664,10 @@ func variableCardTag(variable compose.Var, language string) (string, string, str
 }
 
 func variableCardClass(variable compose.Var) string {
-	var classes []string
-	if variable.IsReadonly() {
-		classes = append(classes, "read-only")
-	}
 	if variable.IsRequired() {
-		classes = append(classes, "[&:user-invalid]:hx:border-red-500 [&:user-invalid]:hx:bg-red-50 [&:user-invalid]:hx:dark:bg-red-900/20")
+		return "[&:user-invalid]:hx:border-red-500 [&:user-invalid]:hx:bg-red-50 [&:user-invalid]:hx:dark:bg-red-900/20"
 	}
-	return strings.Join(classes, " ")
+	return ""
 }
 
 func variableCardSubtitle(variable compose.Var, language string) string {
@@ -1377,27 +1702,6 @@ func variableCardSubtitle(variable compose.Var, language string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func variableCardHTML(variable compose.Var) string {
-	defaultValue := strings.TrimSpace(variable.DefaultString())
-	if defaultValue == "" || variable.IsSecret() {
-		return ""
-	}
-
-	editable := "true"
-	preClass := "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors"
-	codeClass := "hx:block hx:whitespace-pre hx:font-mono hx:outline-none"
-	if variable.IsReadonly() {
-		editable = "false"
-		preClass += " hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100"
-		codeClass += " hx:cursor-default hx:select-text"
-	} else {
-		preClass += " hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100"
-		codeClass += " hx:cursor-text focus:hx:bg-white/60 hx:dark:focus:hx:bg-blue-950/20"
-	}
-
-	return fmt.Sprintf(`<div class="not-prose hx:px-4 hx:pb-4"><pre class="%s" data-editable="%s"><code class="%s" contenteditable="%s" spellcheck="false">%s</code></pre></div>`, preClass, editable, codeClass, editable, html.EscapeString(defaultValue))
-}
-
 func variableHeadingAnchor(key string) string {
 	trimmed := strings.TrimSpace(strings.ToLower(key))
 	trimmed = strings.ReplaceAll(trimmed, " ", "-")
@@ -1414,5 +1718,54 @@ func servicesForSet(m *compose.Project, setKey string) []string {
 			}
 		}
 	}
+	return services
+}
+
+func servicesForProfile(m *compose.Project, profile string) []compose.Service {
+	if m == nil || len(m.Services) == 0 {
+		return nil
+	}
+
+	trimmedProfile := strings.TrimSpace(profile)
+	if trimmedProfile == "" {
+		return nil
+	}
+
+	services := make([]compose.Service, 0, len(m.Services))
+	for _, service := range m.Services {
+		for _, candidate := range service.Profiles {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			if candidate == trimmedProfile {
+				services = append(services, service)
+				break
+			}
+		}
+	}
+
+	return services
+}
+
+func servicesWithoutProfiles(m *compose.Project) []compose.Service {
+	if m == nil || len(m.Services) == 0 {
+		return nil
+	}
+
+	services := make([]compose.Service, 0, len(m.Services))
+	for _, service := range m.Services {
+		hasProfile := false
+		for _, candidate := range service.Profiles {
+			if strings.TrimSpace(candidate) != "" {
+				hasProfile = true
+				break
+			}
+		}
+		if !hasProfile {
+			services = append(services, service)
+		}
+	}
+
 	return services
 }

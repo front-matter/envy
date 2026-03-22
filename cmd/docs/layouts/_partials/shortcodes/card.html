@@ -2,33 +2,70 @@
 {{- $title := .title -}}
 {{- $titleLink := .titleLink | default "" -}}
 {{- $icon := .icon -}}
+{{- $cardType := .cardType | default "" -}}
+{{- if and (eq $icon "") (or (eq $cardType "profile") (eq $cardType "service") (eq $cardType "set") (eq $cardType "var")) -}}
+  {{- $icon = $cardType -}}
+{{- end -}}
 {{- $iconImage := .iconImage -}}
 {{- $iconImageClass := .iconImageClass | default "hx:h-6 hx:w-6 hx:shrink-0" -}}
-{{- $subtitle := .subtitle -}}
-{{- $subtitle2 := .subtitle2 -}}
-{{- $subtitle3 := .subtitle3 | default "" -}}
-{{- $subtitle4 := .subtitle4 | default "" -}}
+{{- $iconAttributes := .iconAttributes | default "" -}}
+{{- $iconGapClass := .iconGapClass | default "hx:gap-2" -}}
+{{- $description := .description | default "" -}}
+{{- $dockerImage := .dockerImage | default "" -}}
+{{- $dockerImageLink := .dockerImageLink | default "" -}}
+{{- $platform := .platform | default "" -}}
+{{- $command := .command | default "" -}}
+{{- $subtitleTag := .subtitleTag | default "" -}}
+{{- $descriptionLink := .descriptionLink | default "" -}}
+{{- $tagsServices := .tagsServices | default "" -}}
+{{- $tagsProfiles := .tagsProfiles | default "" -}}
+{{- $tagsSets := .tagsSets | default "" -}}
 {{- $image := .image -}}
 {{- $alt := .alt | default $title -}}
-{{- $width := .width -}}
-{{- $height := .height -}}
+{{- $width := .width | default 0 -}}
+{{- $height := .height | default 0 -}}
 {{- $imageStyle := .imageStyle -}}
 {{- $tag := .tag -}}
 {{- $tagColor := .tagColor | default .tagType | default "" -}}{{- /* Compatibility with previous parameter. */ -}}
-{{- $tagBorder := not (eq .tagBorder false) | default true }}
-{{- $tagIcon := .tagIcon -}}
+{{- $tagBorder := not (eq .tagBorder false) | default true -}}
+{{- $tagIcon := .tagIcon | default "" -}}
 {{- $titleClass := .titleClass | default "" -}}
+{{- $titleSize := "hx:text-xl" -}}
+{{- if .isFirst -}}
+  {{- $titleSize = "hx:text-2xl" -}}
+{{- end -}}
 {{- $titlePadding := .titlePadding | default "" -}}
 {{- $class := .class | default "" -}}
 {{- $html := .html | default "" -}}
+{{- $var := .var | default "" -}}
 {{- $tagHTML := .tagHTML | default "" -}}
 {{- $tags := .tags | default "" -}}
 {{- $tagLinks := .tagLinks | default "" -}}
 {{- $defaultTagSizeClass := "hx:px-3 hx:leading-7 hx:text-sm md:hx:text-base" -}}
 
-{{ $linkClass := "hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900" }}
+{{- $varReadonly := false -}}
+{{- $varRequired := false -}}
+{{- $varValue := $var -}}
+{{- if hasPrefix $var "envy:readonly:" -}}
+  {{- $varReadonly = true -}}
+  {{- $varValue = strings.TrimPrefix "envy:readonly:" $var -}}
+{{- end -}}
+{{- $varValue = htmlUnescape $varValue -}}
+{{- if hasPrefix $varValue "?" -}}
+  {{- $varRequired = true -}}
+{{- end -}}
+
+{{- /* var metadata auto-configure readonly tag and class. */ -}}
+{{- if $varReadonly -}}
+  {{- $class = strings.TrimSpace (printf "read-only %s" $class) -}}
+{{- end -}}
+{{- if $varRequired -}}
+  {{- $class = strings.TrimSpace (printf "%s [&:user-invalid]:hx:border-red-500 [&:user-invalid]:hx:bg-red-50 [&:user-invalid]:hx:dark:bg-red-900/20" $class) -}}
+{{- end -}}
+
+{{- $linkClass := "hx:hover:border-gray-300 hx:bg-transparent hx:shadow-xs hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900" -}}
 {{- with $image -}}
-  {{ $linkClass = "hx:hover:border-gray-300 hx:bg-gray-100 hx:shadow-sm hx:dark:border-neutral-700 hx:dark:bg-neutral-800 hx:dark:text-gray-50 hx:hover:shadow-lg hx:dark:hover:border-neutral-500 hx:dark:hover:bg-neutral-700" }}
+  {{- $linkClass = "hx:hover:border-gray-300 hx:bg-gray-100 hx:shadow-sm hx:dark:border-neutral-700 hx:dark:bg-neutral-800 hx:dark:text-gray-50 hx:hover:shadow-lg hx:dark:hover:border-neutral-500 hx:dark:hover:bg-neutral-700" -}}
 {{- end -}}
 
 {{- $external := strings.HasPrefix $link "http" -}}
@@ -60,7 +97,7 @@
   {{- end -}}
 
   {{- $padding := "hx:p-4" -}}
-  {{- with (or $subtitle $subtitle2 $subtitle3 $subtitle4) -}}
+  {{- with (or $description $dockerImage $command $subtitleTag $descriptionLink $platform $tagsServices $tagsProfiles $tagsSets $var) -}}
     {{- $padding = "hx:pt-4 hx:px-4" -}}
   {{- end -}}
   {{- with $titlePadding -}}
@@ -69,41 +106,156 @@
 
   <div>
     {{- if $titleLink -}}
-      <a class="hextra-card-icon hx:flex hx:font-semibold hx:items-center hx:gap-2 {{ $padding }} hx:text-gray-700 hx:no-underline hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}" href="{{ $titleHref }}" {{ with $titleExternal }}target="_blank" rel="noreferrer"{{ end -}}>
-        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon) -}}{{- end -}}{{- end -}}
+      <a class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:no-underline hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}" href="{{ $titleHref }}" {{ with $titleExternal }}target="_blank" rel="noreferrer"{{ end -}}>
+        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
         {{- $title -}}
       </a>
     {{- else -}}
-      <span class="hextra-card-icon hx:flex hx:font-semibold hx:items-center hx:gap-2 {{ $padding }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
-        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon) -}}{{- end -}}{{- end -}}
+      <span class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
+        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
         {{- $title -}}
       </span>
     {{- end -}}
-    {{- with $subtitle -}}
+    {{- with $description -}}
       {{- $subtitleClass := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-2" -}}
-      {{- if and (not (in $subtitle "\n\n")) (not (in $subtitle "<pre>")) (not (in $subtitle "<br><br>")) (not (strings.HasPrefix $subtitle "    ")) (not (in $subtitle "\n    ")) -}}
+      {{- $renderedDescription := $description -}}
+      {{- if and (eq $cardType "service") (in $description "\n") -}}
+        {{- $readmeLabel := i18n "readme" | default "More info" -}}
+        {{- $descriptionLines := split $description "\n" -}}
+        {{- $renderedLines := slice -}}
+        {{- range $descriptionLines -}}
+          {{- $line := . -}}
+          {{- $trimmedLine := strings.TrimSpace $line -}}
+          {{- if or (hasPrefix $trimmedLine "https://") (hasPrefix $trimmedLine "http://") -}}
+            {{- $readmeLink := printf "<a href=\"%s\" class=\"hx:inline-flex hx:items-center hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline\">%s</a>" $trimmedLine ($readmeLabel | plainify) -}}
+            {{- $renderedLines = $renderedLines | append $readmeLink -}}
+          {{- else -}}
+            {{- $renderedLines = $renderedLines | append $line -}}
+          {{- end -}}
+        {{- end -}}
+        {{- $renderedDescription = delimit $renderedLines "\n" -}}
+      {{- end -}}
+      {{- if and (eq $cardType "service") (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
+        {{- $subtitleClass = "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0 hx:line-clamp-3" -}}
+      {{- else if and (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
         {{- $subtitleClass = printf "%s %s" $subtitleClass "hx:line-clamp-3" -}}
       {{- end -}}
-      <div class="{{ $subtitleClass }}">{{- $subtitle | markdownify -}}</div>
+      <div class="{{ $subtitleClass }}">{{- $renderedDescription | markdownify -}}</div>
     {{- end -}}
-    {{- with $subtitle2 -}}
-      {{- $subtitle2Class := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-400 hx:dark:text-gray-500 hx:px-4 hx:mb-2 hx:mt-0" -}}
-      <div class="{{ $subtitle2Class }}">{{- $subtitle2 | markdownify -}}</div>
+    {{- with $dockerImage -}}
+      {{- $dockerImageLooksFormatted := or (in $dockerImage "**") (or (in $dockerImage "[") (or (in $dockerImage "<br>") (in $dockerImage "\n"))) -}}
+      {{- if and (eq $cardType "service") (not $dockerImageLooksFormatted) -}}
+        {{- $imageMarkdown := printf "**Image:** %s" $dockerImage -}}
+        {{- if $dockerImageLink -}}
+          {{- $imageMarkdown = printf "**Image:** [%s](%s)" $dockerImage $dockerImageLink -}}
+        {{- end -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-400 hx:dark:text-gray-500 hx:px-4 hx:mb-2 hx:mt-0">{{- $imageMarkdown | markdownify -}}</div>
+      {{- else -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-400 hx:dark:text-gray-500 hx:px-4 hx:mb-2 hx:mt-0">{{- $dockerImage | markdownify -}}</div>
+      {{- end -}}
     {{- end -}}
-    {{- with $subtitle3 -}}
-      {{- $subtitle3Class := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0" -}}
-      <div class="{{ $subtitle3Class }}">{{- $subtitle3 | markdownify -}}</div>
+    {{- if and (eq $cardType "service") $platform -}}
+      {{- $platformLabel := i18n "platform" | default "Platform" -}}
+      {{- $platformMarkdown := printf "**%s:** %s" $platformLabel ($platform | plainify) -}}
+      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $platformMarkdown | markdownify -}}</div>
     {{- end -}}
-    {{- with $subtitle4 -}}
-      {{- $subtitle4Class := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0" -}}
-      <div class="{{ $subtitle4Class }}">{{- $subtitle4 | markdownify -}}</div>
+    {{- with $command -}}
+      {{- $cmdLooksFormatted := hasPrefix $command "**" -}}
+      {{- if and (eq $cardType "service") (not $cmdLooksFormatted) -}}
+        {{- $commandLabel := i18n "command" | default "Command" -}}
+        {{- $cmdMarkdown := printf "**%s:**\n\n    %s" $commandLabel (strings.TrimSpace $command) -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $cmdMarkdown | markdownify -}}</div>
+      {{- else -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $command | markdownify -}}</div>
+      {{- end -}}
+    {{- end -}}
+    {{- if and (eq $cardType "service") $tagsProfiles -}}
+      {{- $profileTags := split $tagsProfiles "," -}}
+      <div class="hextra-card-subtitle hx:px-4 hx:mb-2 hx:mt-0">
+        <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
+          {{- range $profileTags -}}
+            {{- $profile := strings.TrimSpace . -}}
+            {{- if $profile -}}
+              {{- $profileSlug := replace (replace (replace $profile "/" "-") "\\" "-") " " "-" -}}
+              {{- $profileHref := printf "/profiles/%s/" $profileSlug | relLangURL -}}
+              <a href="{{ $profileHref }}" title="{{ $profile | plainify }}" class="not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline">
+                {{- partial "shortcodes/badge.html" (dict "content" $profile "color" "green" "sizeClass" "hx:text-xs") -}}
+              </a>
+            {{- end -}}
+          {{- end -}}
+        </div>
+      </div>
+    {{- end -}}
+    {{- if and (eq $cardType "service") $tagsSets -}}
+      {{- $setTags := split $tagsSets "," -}}
+      <div class="hextra-card-subtitle hx:px-4 hx:mb-2 hx:mt-0">
+        <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
+          {{- range $setTags -}}
+            {{- $set := strings.TrimSpace . -}}
+            {{- if $set -}}
+              {{- $setSlug := replace (replace (replace $set "/" "-") "\\" "-") " " "-" -}}
+              {{- $setHref := printf "/sets/%s/" $setSlug | relLangURL -}}
+              <a href="{{ $setHref }}" title="{{ $set | plainify }}" class="not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline">
+                {{- partial "shortcodes/badge.html" (dict "content" $set "color" "blue" "sizeClass" "hx:text-xs") -}}
+              </a>
+            {{- end -}}
+          {{- end -}}
+        </div>
+      </div>
+    {{- end -}}
+    {{- with $descriptionLink -}}
+      {{- $readmeLabel := i18n "readme" | default "More info" -}}
+      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">
+        <a href="{{ $descriptionLink | safeURL }}" class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline"{{ if strings.HasPrefix $descriptionLink "http" }} target="_blank" rel="noreferrer"{{ end }}>
+          {{- partial "utils/icon.html" (dict "name" "readme") -}}
+          <span>{{ $readmeLabel | plainify }}</span>
+        </a>
+      </div>
+    {{- end -}}
+    {{- with $subtitleTag -}}
+      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $subtitleTag | markdownify -}}</div>
+    {{- end -}}
+    {{- if $tagsServices -}}
+      {{- $serviceTags := split $tagsServices "," -}}
+      <div class="hextra-card-subtitle hx:px-4 hx:mb-2 hx:mt-0">
+        <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
+          {{- range $serviceTags -}}
+            {{- $service := strings.TrimSpace . -}}
+            {{- if $service -}}
+              {{- $serviceSlug := replace (replace (replace $service "/" "-") "\\" "-") " " "-" -}}
+              {{- $serviceHref := printf "/services/%s/" $serviceSlug | relLangURL -}}
+              <a href="{{ $serviceHref }}" title="{{ $service | plainify }}" class="not-prose hx:inline-flex hx:align-middle hx:no-underline hover:hx:no-underline">
+                {{- partial "shortcodes/badge.html" (dict "content" $service "color" "red" "sizeClass" "hx:text-xs") -}}
+              </a>
+            {{- end -}}
+          {{- end -}}
+        </div>
+      </div>
     {{- end -}}
     {{- with $html -}}
       <div class="hextra-card-html">{{ . | safeHTML }}</div>
     {{- end -}}
+    {{- if $varValue -}}
+      {{- $editable := "true" -}}
+      {{- $preClass := "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100" -}}
+      {{- $codeClass := "hx:block hx:whitespace-pre hx:font-mono hx:outline-none hx:cursor-text focus:hx:bg-white/60 hx:dark:focus:hx:bg-blue-950/20" -}}
+      {{- if $varReadonly -}}
+        {{- $editable = "false" -}}
+        {{- $preClass = "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100" -}}
+        {{- $codeClass = "hx:block hx:whitespace-pre hx:font-mono hx:outline-none hx:cursor-default hx:select-text" -}}
+      {{- end -}}
+      <div class="not-prose hx:px-4 hx:pt-4"><pre class="{{ $preClass }}" data-editable="{{ $editable }}"><code class="{{ $codeClass }}" contenteditable="{{ $editable }}" spellcheck="false">{{- $varValue | htmlEscape -}}</code></pre></div>
+    {{- end -}}
+    {{- if $varReadonly -}}
+      <div class="hextra-card-subtitle hx:px-4 hx:py-4 hx:mt-0">
+        <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
+          {{- partial "shortcodes/badge.html" (dict "content" (i18n "readonly" | default "readonly") "color" "yellow" "border" false "sizeClass" "hx:text-xs") -}}
+        </div>
+      </div>
+    {{- end -}}
   </div>
 
-  {{- if $tag }}
+  {{- if $tag -}}
     {{- $tagClass := "hextra-card-tag" -}}
     {{- if eq $tag "secret" -}}
       {{- $tagClass = "hextra-card-tag hextra-card-tag-secret" -}}
@@ -115,8 +267,7 @@
       "border" $tagBorder
       "icon" $tagIcon
       "sizeClass" $defaultTagSizeClass
-      )
-    -}}
+    ) -}}
   {{- end -}}
   {{- if $tags -}}
     {{- $tagList := split $tags "," -}}
