@@ -36,14 +36,14 @@ brew install envy
 envy [command] [flags]
 
 Commands:
-  import      Import .env files and generate compose.yaml
-  validate    Validate a compose.yaml (using docker compose config)
-  lint        Lint compose.yaml for warnings
+  import      Import .env files and generate compose.yml
+  validate    Validate a compose.yml (using docker compose config)
+  lint        Lint compose.yml for warnings
   diff        Show variables missing from or extra in a .env file
-  generate    Generate a .env file from compose.yaml
+  generate    Generate a .env file from compose.yml
   secrets     List or audit secret environment variables
-  build       Generate documentation site for compose.yaml file
-  server      Run local documentation site generated from compose.yaml
+  build       Generate documentation site for compose.yml file
+  server      Run local documentation site generated from compose.yml
   deploy      Deploy documentation site to GitHub Pages
   completion  Generate shell completion scripts
 
@@ -55,7 +55,7 @@ Global flags:
 ### Workflow
 
 ```bash
-# Import env files into compose.yaml
+# Import env files into compose.yml
 # Auto-detects one env file: .env preferred over .env.example
 envy import
 
@@ -63,12 +63,12 @@ envy import
 envy import .env
 envy import ./config
 
-# --file accepts a folder and writes ./generated/compose.yaml
+# --file accepts a folder and writes ./generated/compose.yml
 envy import .env --file ./generated
 
 # Safety: if target file already exists, import prints a warning and does not overwrite it
 
-# Lint compose.yaml and run go-ruleguard checks
+# Lint compose.yml and run go-ruleguard checks
 envy lint
 
 # See what's missing or undocumented
@@ -93,8 +93,8 @@ envy secrets --check
 # Print envy version
 envy --version
 
-# Build documentation site for compose.yaml
-# If docs/index.md exists next to compose.yaml, it is used as the docs home page.
+# Build documentation site for compose.yml
+# If docs/index.md exists next to compose.yml, it is used as the docs home page.
 envy build --destination public
 
 # Run local documentation site
@@ -113,9 +113,9 @@ envy deploy --target production
 - Each `envy build` run refreshes the contents of [.envy](.envy) and rewrites generated pages deterministically
 - Existing files in [.envy](.envy) are treated as build output, not as user-managed content
 
-## compose.yaml format
+## compose.yml format
 
-`envy` reads a single `compose.yaml` file as its source of truth:
+`envy` reads a single `compose.yml` file as its source of truth:
 
 ```yaml
 x-envy:
