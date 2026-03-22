@@ -1084,7 +1084,7 @@ func generateServiceMarkdown(m *compose.Project, service compose.Service, langua
 	for _, variable := range vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable)))
+		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), false, language))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
@@ -1116,7 +1116,7 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 	for _, variable := range set.Vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable)))
+		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), true, language))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
@@ -1142,8 +1142,12 @@ func renderServiceCard(service compose.Service, language string, titleLink strin
 	}
 	sb.WriteString(" cardType=\"service\"")
 
-	if description := strings.TrimSpace(service.Description); description != "" {
+	description, descriptionLink := splitServiceDescriptionAndLink(service.Description)
+	if description != "" {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
+	}
+	if descriptionLink != "" {
+		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(descriptionLink)))
 	}
 
 	if strings.TrimSpace(service.Image) != "" {
@@ -1174,6 +1178,74 @@ func renderServiceCard(service compose.Service, language string, titleLink strin
 
 	sb.WriteString(" >}}\n")
 	return sb.String()
+}
+
+func splitServiceDescriptionAndLink(raw string) (string, string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", ""
+	}
+
+	lines := strings.Split(trimmed, "\n")
+	keptLines := make([]string, 0, len(lines))
+	link := ""
+
+	for _, line := range lines {
+		clean := strings.TrimSpace(line)
+		if clean == "" {
+			keptLines = append(keptLines, line)
+			continue
+		}
+
+		if link == "" {
+			if extracted := extractServiceDescriptionLink(clean); extracted != "" {
+				link = extracted
+				continue
+			}
+		}
+
+		keptLines = append(keptLines, line)
+	}
+
+	return strings.TrimSpace(strings.Join(keptLines, "\n")), link
+}
+
+func extractServiceDescriptionLink(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "link:") {
+		candidate := strings.TrimSpace(trimmed[len("link:"):])
+		if strings.HasPrefix(candidate, "https://") || strings.HasPrefix(candidate, "http://") {
+			return candidate
+		}
+		return ""
+	}
+
+	if strings.HasPrefix(trimmed, "[") {
+		if end := strings.Index(trimmed, "]:"); end > 1 {
+			candidate := strings.TrimSpace(trimmed[end+2:])
+			if strings.HasPrefix(candidate, "https://") || strings.HasPrefix(candidate, "http://") {
+				return candidate
+			}
+		}
+
+		if open := strings.Index(trimmed, "]("); open > 1 && strings.HasSuffix(trimmed, ")") {
+			candidate := strings.TrimSpace(trimmed[open+2 : len(trimmed)-1])
+			if strings.HasPrefix(candidate, "https://") || strings.HasPrefix(candidate, "http://") {
+				return candidate
+			}
+		}
+	}
+
+	if (strings.HasPrefix(trimmed, "https://") || strings.HasPrefix(trimmed, "http://")) && !strings.Contains(trimmed, " ") {
+		return trimmed
+	}
+
+	return ""
 }
 
 func csvAttributeValues(values []string) string {
@@ -1630,7 +1702,7 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
-func renderVarCard(variable compose.Var, description, class string) string {
+func renderVarCard(variable compose.Var, description, class string, showMissingAsSecret bool, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card link=\"\" title=\"%s\" cardType=\"var\"",
 		escapeShortcodeValue(variable.Key),
@@ -1639,12 +1711,24 @@ func renderVarCard(variable compose.Var, description, class string) string {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
 	defaultValue := strings.TrimSpace(variable.DefaultString())
+	hasVarValue := false
+	hasQuestionPrefix := showMissingAsSecret && strings.HasPrefix(defaultValue, "?")
+	if hasQuestionPrefix {
+		defaultValue = strings.TrimPrefix(defaultValue, "?")
+	}
 	if !variable.IsSecret() && defaultValue != "" {
 		if variable.IsReadonly() {
 			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue("envy:readonly:"+defaultValue)))
 		} else {
 			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue(defaultValue)))
 		}
+		hasVarValue = true
+	}
+	if hasQuestionPrefix {
+		sb.WriteString(fmt.Sprintf(" tagBottom=\"%s\" tagBottomColor=\"red\"", escapeShortcodeValue(generatedPageString(language, "required"))))
+	}
+	if showMissingAsSecret && !hasVarValue {
+		sb.WriteString(fmt.Sprintf(" tagBottom=\"%s\" tagBottomColor=\"orange\"", escapeShortcodeValue(generatedPageString(language, "secret"))))
 	}
 	if class != "" {
 		sb.WriteString(fmt.Sprintf(" class=\"%s\"", escapeShortcodeValue(class)))

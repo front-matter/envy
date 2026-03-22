@@ -13,7 +13,7 @@ weight: 5
 <div id="invenio_datacite_datacenter_symbol"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_DATACITE_DATACENTER_SYMBOL" cardType="var" >}}
+{{< card link="" title="INVENIO_DATACITE_DATACENTER_SYMBOL" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_datacite_enabled"></div>
@@ -25,7 +25,7 @@ weight: 5
 <div id="invenio_datacite_prefix"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_DATACITE_PREFIX" cardType="var" >}}
+{{< card link="" title="INVENIO_DATACITE_PREFIX" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_datacite_test_mode"></div>
@@ -37,7 +37,7 @@ weight: 5
 <div id="invenio_datacite_username"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_DATACITE_USERNAME" cardType="var" >}}
+{{< card link="" title="INVENIO_DATACITE_USERNAME" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_rdm_allow_external_doi_versioning"></div>

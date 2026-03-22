@@ -712,21 +712,13 @@ func parseServiceDescriptionFromComments(comments ...string) string {
 				continue
 			}
 
-			if plainLinkPattern.MatchString(clean) || markdownReferenceLinkPattern.MatchString(clean) {
+			if isSetCommentLinkOnlyLine(clean) {
 				flushParagraph()
-				blocks = append(blocks, clean)
-				continue
-			}
-
-			if matches := markdownLinkPattern.FindStringSubmatch(clean); len(matches) == 2 && matches[0] == clean {
-				flushParagraph()
-				blocks = append(blocks, clean)
-				continue
-			}
-
-			if matches := prefixedLinkPattern.FindStringSubmatch(clean); len(matches) == 2 {
-				flushParagraph()
-				blocks = append(blocks, matches[1])
+				if extracted := extractFirstCommentLink(clean); extracted != "" {
+					blocks = append(blocks, extracted)
+				} else {
+					blocks = append(blocks, clean)
+				}
 				continue
 			}
 

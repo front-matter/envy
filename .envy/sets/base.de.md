@@ -43,7 +43,7 @@ weight: 2
 <div id="invenio_rdm_citation_styles_default"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_RDM_CITATION_STYLES_DEFAULT" cardType="var" >}}
+{{< card link="" title="INVENIO_RDM_CITATION_STYLES_DEFAULT" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_search_hosts"></div>
@@ -67,12 +67,12 @@ weight: 2
 <div id="test_required_var"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="TEST_REQUIRED_VAR" cardType="var" var="?required-value" >}}
+{{< card link="" title="TEST_REQUIRED_VAR" cardType="var" var="required-value" tagBottom="Erforderlich" tagBottomColor="red" >}}
 {{< /cards >}}
 
 <div id="test_secret_var"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="TEST_SECRET_VAR" cardType="var" >}}
+{{< card link="" title="TEST_SECRET_VAR" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 

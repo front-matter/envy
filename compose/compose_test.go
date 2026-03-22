@@ -442,6 +442,58 @@ func TestManifestLoadServiceDescriptionFromCommentsWithStandaloneLink(t *testing
 	}
 }
 
+func TestManifestLoadServiceDescriptionFromCommentsWithPrefixedLink(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  # Describes proxy service configuration.",
+		"  # Link: https://example.org/proxy/docs",
+		"  proxy:",
+		"    image: caddy:2.10",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 1 {
+		t.Fatalf("expected one service, got %+v", m.Services)
+	}
+
+	want := "Describes proxy service configuration.\nhttps://example.org/proxy/docs"
+	if m.Services[0].Description != want {
+		t.Fatalf("expected service description with prefixed link normalized, got %q", m.Services[0].Description)
+	}
+}
+
+func TestManifestLoadServiceDescriptionFromCommentsWithMarkdownLink(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  # Describes mail service configuration.",
+		"  # [Mail Docs](https://example.org/mail/docs)",
+		"  mail:",
+		"    image: mailhog/mailhog:v1.0.1",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if len(m.Services) != 1 {
+		t.Fatalf("expected one service, got %+v", m.Services)
+	}
+
+	want := "Describes mail service configuration.\nhttps://example.org/mail/docs"
+	if m.Services[0].Description != want {
+		t.Fatalf("expected service description with markdown link normalized, got %q", m.Services[0].Description)
+	}
+}
+
 func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",

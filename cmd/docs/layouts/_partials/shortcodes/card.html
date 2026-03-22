@@ -28,6 +28,8 @@
 {{- $tag := .tag -}}
 {{- $tagColor := .tagColor | default .tagType | default "" -}}{{- /* Compatibility with previous parameter. */ -}}
 {{- $tagBorder := not (eq .tagBorder false) | default true -}}
+{{- $tagBottom := .tagBottom | default "" -}}
+{{- $tagBottomColor := .tagBottomColor | default "" -}}
 {{- $tagIcon := .tagIcon | default "" -}}
 {{- $titleClass := .titleClass | default "" -}}
 {{- $titleSize := "hx:text-xl" -}}
@@ -118,29 +120,12 @@
     {{- end -}}
     {{- with $description -}}
       {{- $subtitleClass := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-2" -}}
-      {{- $renderedDescription := $description -}}
-      {{- if and (eq $cardType "service") (in $description "\n") -}}
-        {{- $readmeLabel := i18n "readme" | default "More info" -}}
-        {{- $descriptionLines := split $description "\n" -}}
-        {{- $renderedLines := slice -}}
-        {{- range $descriptionLines -}}
-          {{- $line := . -}}
-          {{- $trimmedLine := strings.TrimSpace $line -}}
-          {{- if or (hasPrefix $trimmedLine "https://") (hasPrefix $trimmedLine "http://") -}}
-            {{- $readmeLink := printf "<a href=\"%s\" class=\"hx:inline-flex hx:items-center hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline\">%s</a>" $trimmedLine ($readmeLabel | plainify) -}}
-            {{- $renderedLines = $renderedLines | append $readmeLink -}}
-          {{- else -}}
-            {{- $renderedLines = $renderedLines | append $line -}}
-          {{- end -}}
-        {{- end -}}
-        {{- $renderedDescription = delimit $renderedLines "\n" -}}
-      {{- end -}}
       {{- if and (eq $cardType "service") (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
         {{- $subtitleClass = "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0 hx:line-clamp-3" -}}
       {{- else if and (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
         {{- $subtitleClass = printf "%s %s" $subtitleClass "hx:line-clamp-3" -}}
       {{- end -}}
-      <div class="{{ $subtitleClass }}">{{- $renderedDescription | markdownify -}}</div>
+      <div class="{{ $subtitleClass }}">{{- $description | markdownify -}}</div>
     {{- end -}}
     {{- with $dockerImage -}}
       {{- $dockerImageLooksFormatted := or (in $dockerImage "**") (or (in $dockerImage "[") (or (in $dockerImage "<br>") (in $dockerImage "\n"))) -}}
@@ -244,12 +229,28 @@
         {{- $preClass = "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100" -}}
         {{- $codeClass = "hx:block hx:whitespace-pre hx:font-mono hx:outline-none hx:cursor-default hx:select-text" -}}
       {{- end -}}
-      <div class="not-prose hx:px-4 hx:pt-4"><pre class="{{ $preClass }}" data-editable="{{ $editable }}"><code class="{{ $codeClass }}" contenteditable="{{ $editable }}" spellcheck="false">{{- $varValue | htmlEscape -}}</code></pre></div>
+      <div class="not-prose hx:px-4 hx:pt-4"><pre class="{{ $preClass }}" data-editable="{{ $editable }}"><code class="{{ $codeClass }}" contenteditable="{{ $editable }}" spellcheck="false">{{- $varValue -}}</code></pre></div>
     {{- end -}}
     {{- if $varReadonly -}}
       <div class="hextra-card-subtitle hx:px-4 hx:py-4 hx:mt-0">
         <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
           {{- partial "shortcodes/badge.html" (dict "content" (i18n "readonly" | default "readonly") "color" "yellow" "border" false "sizeClass" "hx:text-xs") -}}
+        </div>
+      </div>
+    {{- end -}}
+    {{- if $tagBottom -}}
+      {{- $tagBottomLabel := $tagBottom -}}
+      {{- if eq $tagBottom "secret" -}}
+        {{- $tagBottomLabel = i18n "secret" | default "secret" -}}
+      {{- else if eq $tagBottom "readonly" -}}
+        {{- $tagBottomLabel = i18n "readonly" | default "readonly" -}}
+      {{- else if eq $tagBottom "required" -}}
+        {{- $tagBottomLabel = i18n "required" | default "required" -}}
+      {{- end -}}
+      {{- $resolvedBottomColor := $tagBottomColor | default "gray" -}}
+      <div class="hextra-card-subtitle hx:px-4 hx:py-4 hx:mt-0">
+        <div class="not-prose hx:flex hx:flex-wrap hx:gap-2">
+          {{- partial "shortcodes/badge.html" (dict "content" $tagBottomLabel "color" $resolvedBottomColor "border" false "sizeClass" "hx:text-xs") -}}
         </div>
       </div>
     {{- end -}}

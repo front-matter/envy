@@ -31,7 +31,7 @@ weight: 4
 <div id="postgres_password"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="POSTGRES_PASSWORD" cardType="var" >}}
+{{< card link="" title="POSTGRES_PASSWORD" cardType="var" tagBottom="secret" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_sqlalchemy_database_uri"></div>

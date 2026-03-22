@@ -7,8 +7,7 @@ weight: 4
 ---
 
 {{< cards cols="1" >}}
-{{< card title="search" cardType="service" description=`Describes search service configuration. For details see
-https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/` dockerImage="opensearchproject/opensearch:2.18.0" dockerImageLink="https://hub.docker.com/r/opensearchproject/opensearch" tagsSets="search" >}}
+{{< card title="search" cardType="service" description=`Describes search service configuration. For details see` descriptionLink="https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/" dockerImage="opensearchproject/opensearch:2.18.0" dockerImageLink="https://hub.docker.com/r/opensearchproject/opensearch" tagsSets="search" >}}
 {{< /cards >}}
 
 <div id="bootstrap.memory_lock"></div>

@@ -49,7 +49,7 @@ weight: 6
 <div id="invenio_mail_password"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_MAIL_PASSWORD" cardType="var" >}}
+{{< card link="" title="INVENIO_MAIL_PASSWORD" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_admin_email"></div>

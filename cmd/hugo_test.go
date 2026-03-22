@@ -41,6 +41,34 @@ func TestNormalizeSetDocLink(t *testing.T) {
 	}
 }
 
+func TestSplitServiceDescriptionAndLink(t *testing.T) {
+	description, link := splitServiceDescriptionAndLink("Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/")
+	if description != "Describes search service configuration. For details see" {
+		t.Fatalf("expected description without link line, got %q", description)
+	}
+	if link != "https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/" {
+		t.Fatalf("expected extracted link, got %q", link)
+	}
+}
+
+func TestRenderServiceCardUsesDescriptionLink(t *testing.T) {
+	service := compose.Service{
+		Name:        "search",
+		Description: "Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/",
+	}
+
+	card := renderServiceCard(service, "en", "/services/search")
+	if !strings.Contains(card, "description=`Describes search service configuration. For details see`") {
+		t.Fatalf("expected service card description without doc link line, got:\n%s", card)
+	}
+	if !strings.Contains(card, "descriptionLink=\"https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/\"") {
+		t.Fatalf("expected service card to emit descriptionLink, got:\n%s", card)
+	}
+	if strings.Contains(card, "description=`Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/`") {
+		t.Fatalf("expected service card description to not include URL line, got:\n%s", card)
+	}
+}
+
 func TestHasFlag(t *testing.T) {
 	args := []string{"--destination", "public", "--cleanDestinationDir", "--baseURL=https://example.org"}
 	if !hasFlag(args, "--cleanDestinationDir") {
@@ -96,6 +124,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 				Vars: []compose.Var{
 					{Key: "ZZZ_LAST", Default: "z", Example: "z-sample"},
 					{Key: "APP_ENV", Default: "production", Required: "true", Example: "staging"},
+					{Key: "TEST_REQUIRED_PREFIX_VAR", Default: "?required-value"},
 					{Key: "TEST_SECRET_VAR", Default: "super-secret-value", Secret: "true"},
 					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
 				},
@@ -187,7 +216,12 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"descriptionLink=\"https://example.org/common\"",
 		"tagsServices=\"web\"",
 		`var="production"`,
+		`var="required-value"`,
+		`tagBottom="Required"`,
+		`tagBottomColor="red"`,
 		`var="envy:readonly:locked-value"`,
+		`tagBottom="secret"`,
+		`tagBottomColor="orange"`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {

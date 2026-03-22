@@ -31,13 +31,13 @@ weight: 1
 <div id="invenio_oidc_app_credentials_consumer_key"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_OIDC_APP_CREDENTIALS_CONSUMER_KEY" cardType="var" >}}
+{{< card link="" title="INVENIO_OIDC_APP_CREDENTIALS_CONSUMER_KEY" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_oidc_issuer"></div>
 
 {{< cards cols="1" >}}
-{{< card link="" title="INVENIO_OIDC_ISSUER" cardType="var" >}}
+{{< card link="" title="INVENIO_OIDC_ISSUER" cardType="var" tagBottom="Geheim" tagBottomColor="orange" >}}
 {{< /cards >}}
 
 <div id="invenio_security_changeable"></div>
