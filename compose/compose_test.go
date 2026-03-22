@@ -527,6 +527,96 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 	}
 }
 
+func TestManifestLoadInlineSetVarWithEmptyInterpolationIsNotSecret(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  INVENIO_OIDC_ISSUER: \"${INVENIO_OIDC_ISSUER:-}\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set := m.Sets["app"]
+	if len(set.Vars) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars)
+	}
+
+	variable := set.Vars[0]
+	if variable.IsSecret() {
+		t.Fatalf("expected interpolated empty default to remain non-secret")
+	}
+	if variable.Default != "" {
+		t.Fatalf("expected empty default, got %q", variable.Default)
+	}
+	if variable.IsReadonly() {
+		t.Fatalf("expected interpolated var to remain editable")
+	}
+}
+
+func TestManifestLoadInlineSetVarWithBareEmptyValueIsSecret(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  INVENIO_OIDC_ISSUER:",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set := m.Sets["app"]
+	if len(set.Vars) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars)
+	}
+
+	variable := set.Vars[0]
+	if !variable.IsSecret() {
+		t.Fatalf("expected bare empty value to be secret")
+	}
+	if variable.Default != "" {
+		t.Fatalf("expected secret default to stay empty, got %q", variable.Default)
+	}
+	if variable.DefaultString() != "" {
+		t.Fatalf("expected secret DefaultString to be empty, got %q", variable.DefaultString())
+	}
+}
+
+func TestManifestLoadInlineSetVarWithExplicitEmptyStringIsNotSecret(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  INVENIO_OIDC_ISSUER: \"\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set := m.Sets["app"]
+	if len(set.Vars) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars)
+	}
+
+	variable := set.Vars[0]
+	if variable.IsSecret() {
+		t.Fatalf("expected explicitly empty string to remain non-secret")
+	}
+	if variable.Default != "" {
+		t.Fatalf("expected empty default, got %q", variable.Default)
+	}
+	if variable.IsReadonly() {
+		t.Fatalf("expected explicitly empty string var to remain editable")
+	}
+}
+
 func TestManifestLoadGroupLink(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",

@@ -813,7 +813,11 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				if err := value.Decode(&scalar); err != nil {
 					return out, err
 				}
-				v := normalizeVarComposeSyntax(Var{Key: key, Default: scalar})
+				v := Var{Key: key, Default: scalar}
+				if isImplicitSecretScalar(value) {
+					v.Secret = "true"
+				}
+				v = normalizeVarComposeSyntax(v)
 				if strings.TrimSpace(v.Description) == "" {
 					v.Description = commentDescription
 				}
@@ -840,6 +844,21 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 		}
 	}
 	return out, nil
+}
+
+func isImplicitSecretScalar(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return false
+	}
+	if strings.TrimSpace(node.Value) != "" {
+		return false
+	}
+	switch node.Style {
+	case yaml.DoubleQuotedStyle, yaml.SingleQuotedStyle:
+		return false
+	default:
+		return true
+	}
 }
 
 func parseSetMetadataFromComments(comments ...string) (string, string) {
@@ -1098,6 +1117,9 @@ func normalizeVarComposeSyntax(v Var) Var {
 
 func parseComposeDefaultSyntax(value string) (defaultValue string, required bool, readonly bool) {
 	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false, false
+	}
 	matches := composeInterpolationPattern.FindStringSubmatch(value)
 	if len(matches) == 0 {
 		return value, false, true
