@@ -943,3 +943,153 @@ func TestLintDoesNotErrorWhenAllSetsAreUsed(t *testing.T) {
 		}
 	}
 }
+
+func TestVarDescriptionFromCommentSequenceFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  vars:",
+		"    # Database connection string.",
+		"    - key: DATABASE_URL",
+		"      default: postgres://localhost/app",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["app"]
+	if !ok {
+		t.Fatalf("expected set app, got %+v", m.Sets)
+	}
+	if len(set.Vars) != 1 {
+		t.Fatalf("expected one var, got %+v", set.Vars)
+	}
+	if set.Vars[0].Description != "Database connection string." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars[0].Description)
+	}
+}
+
+func TestVarDescriptionFromCommentMappingFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  vars:",
+		"    # Cache server URL.",
+		"    CACHE_URL:",
+		"      default: redis://localhost:6379",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["app"]
+	if !ok {
+		t.Fatalf("expected set app, got %+v", m.Sets)
+	}
+	if len(set.Vars) != 1 {
+		t.Fatalf("expected one var, got %+v", set.Vars)
+	}
+	if set.Vars[0].Description != "Cache server URL." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars[0].Description)
+	}
+}
+
+func TestVarExplicitDescriptionTakesPrecedenceOverComment(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  vars:",
+		"    # Comment that should be ignored.",
+		"    - key: DATABASE_URL",
+		"      description: Explicit description.",
+		"      default: postgres://localhost/app",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["app"]
+	if !ok {
+		t.Fatalf("expected set app, got %+v", m.Sets)
+	}
+	if set.Vars[0].Description != "Explicit description." {
+		t.Fatalf("expected explicit description to take precedence, got %q", set.Vars[0].Description)
+	}
+}
+
+func TestVarDescriptionFromCommentInlineSetFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-base: &base",
+		"  PLAIN_VAR: value1",
+		"  # Allow users to change their password.",
+		"  SECURITY_CHANGEABLE: \"${SECURITY_CHANGEABLE:-true}\"",
+		"  SECURITY_RECOVERABLE: \"${SECURITY_RECOVERABLE:-true}\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["base"]
+	if !ok {
+		t.Fatalf("expected set base, got %+v", m.Sets)
+	}
+	if len(set.Vars) != 3 {
+		t.Fatalf("expected 3 vars, got %+v", set.Vars)
+	}
+	if set.Vars[0].Description != "" {
+		t.Fatalf("expected no description for PLAIN_VAR, got %q", set.Vars[0].Description)
+	}
+	if set.Vars[1].Description != "Allow users to change their password." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars[1].Description)
+	}
+	if set.Vars[2].Description != "" {
+		t.Fatalf("expected no description for SECURITY_RECOVERABLE, got %q", set.Vars[2].Description)
+	}
+}
+
+func TestVarLinkFromCommentInlineSetFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-base: &base",
+		"  # Allow users to change their password.",
+		"  # Link: https://example.com/docs/security",
+		"  SECURITY_CHANGEABLE: \"${SECURITY_CHANGEABLE:-true}\"",
+		"  PLAIN_VAR: value1",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["base"]
+	if !ok {
+		t.Fatalf("expected set base, got %+v", m.Sets)
+	}
+	if len(set.Vars) != 2 {
+		t.Fatalf("expected 2 vars, got %+v", set.Vars)
+	}
+	if set.Vars[0].Description != "Allow users to change their password." {
+		t.Fatalf("expected description without link line, got %q", set.Vars[0].Description)
+	}
+	if set.Vars[0].Link != "https://example.com/docs/security" {
+		t.Fatalf("expected link from comment, got %q", set.Vars[0].Link)
+	}
+	if set.Vars[1].Link != "" {
+		t.Fatalf("expected no link for PLAIN_VAR, got %q", set.Vars[1].Link)
+	}
+}

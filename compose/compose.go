@@ -86,6 +86,7 @@ type Set struct {
 type Var struct {
 	Key         string `yaml:"key"`
 	Description string `yaml:"description,omitempty"`
+	Link        string `yaml:"-"`
 	Default     string `yaml:"default,omitempty"`
 	Required    string `yaml:"required,omitempty"`
 	Secret      string `yaml:"secret,omitempty"`
@@ -796,12 +797,29 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 			}
 			out.Vars = vars
 		default:
+			comments := []string{
+				node.Content[i].HeadComment,
+				node.Content[i].LineComment,
+				node.Content[i+1].HeadComment,
+				node.Content[i+1].LineComment,
+			}
+			if i >= 2 {
+				comments = append([]string{node.Content[i-1].FootComment}, comments...)
+			}
+			commentDescription, commentLink := parseSetMetadataFromComments(comments...)
+
 			if value.Kind == yaml.ScalarNode {
 				var scalar string
 				if err := value.Decode(&scalar); err != nil {
 					return out, err
 				}
 				v := normalizeVarComposeSyntax(Var{Key: key, Default: scalar})
+				if strings.TrimSpace(v.Description) == "" {
+					v.Description = commentDescription
+				}
+				if strings.TrimSpace(v.Link) == "" {
+					v.Link = commentLink
+				}
 				out.Vars = append(out.Vars, v)
 				continue
 			}
@@ -811,7 +829,14 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				return out, err
 			}
 			v.Key = key
-			out.Vars = append(out.Vars, normalizeVarComposeSyntax(v))
+			v = normalizeVarComposeSyntax(v)
+			if strings.TrimSpace(v.Description) == "" {
+				v.Description = commentDescription
+			}
+			if strings.TrimSpace(v.Link) == "" {
+				v.Link = commentLink
+			}
+			out.Vars = append(out.Vars, v)
 		}
 	}
 	return out, nil
@@ -990,12 +1015,26 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 	switch node.Kind {
 	case yaml.SequenceNode:
 		vars := make([]Var, 0, len(node.Content))
-		for _, item := range node.Content {
+		for j, item := range node.Content {
 			var v Var
 			if err := item.Decode(&v); err != nil {
 				return nil, err
 			}
-			vars = append(vars, normalizeVarComposeSyntax(v))
+			v = normalizeVarComposeSyntax(v)
+			if strings.TrimSpace(v.Description) == "" || strings.TrimSpace(v.Link) == "" {
+				comments := []string{item.HeadComment, item.LineComment}
+				if j >= 1 {
+					comments = append([]string{node.Content[j-1].FootComment}, comments...)
+				}
+				commentDescription, commentLink := parseSetMetadataFromComments(comments...)
+				if strings.TrimSpace(v.Description) == "" {
+					v.Description = commentDescription
+				}
+				if strings.TrimSpace(v.Link) == "" {
+					v.Link = commentLink
+				}
+			}
+			vars = append(vars, v)
 		}
 		return vars, nil
 	case yaml.MappingNode:
@@ -1007,7 +1046,26 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 				return nil, err
 			}
 			v.Key = key
-			vars = append(vars, normalizeVarComposeSyntax(v))
+			v = normalizeVarComposeSyntax(v)
+			if strings.TrimSpace(v.Description) == "" || strings.TrimSpace(v.Link) == "" {
+				comments := []string{
+					node.Content[i].HeadComment,
+					node.Content[i].LineComment,
+					node.Content[i+1].HeadComment,
+					node.Content[i+1].LineComment,
+				}
+				if i >= 2 {
+					comments = append([]string{node.Content[i-1].FootComment}, comments...)
+				}
+				commentDescription, commentLink := parseSetMetadataFromComments(comments...)
+				if strings.TrimSpace(v.Description) == "" {
+					v.Description = commentDescription
+				}
+				if strings.TrimSpace(v.Link) == "" {
+					v.Link = commentLink
+				}
+			}
+			vars = append(vars, v)
 		}
 		return vars, nil
 	default:

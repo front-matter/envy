@@ -1715,6 +1715,9 @@ func renderVarCard(variable compose.Var, description, class string, showMissingA
 	if strings.TrimSpace(description) != "" {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
+	if strings.TrimSpace(variable.Link) != "" {
+		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(strings.TrimSpace(variable.Link))))
+	}
 	defaultValue := strings.TrimSpace(variable.DefaultString())
 	hasVarValue := false
 	hasQuestionPrefix := showMissingAsSecret && strings.HasPrefix(defaultValue, "?")
