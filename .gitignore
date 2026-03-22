@@ -39,6 +39,7 @@ dist/
 # Build output
 public/
 resources/_gen/
+.envy/
 
 # Hugo module cache
 .hugo_build.lock
