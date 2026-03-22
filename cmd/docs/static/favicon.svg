@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      @media (prefers-color-scheme: light) {
+        .favicon-color {
+          stroke: #1e7e74;
+        }
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .favicon-color {
+          stroke: #94e2d5;
+        }
+      }
+    </style>
+  </defs>
+  <!-- Favicon derived from logo.svg -->
+  <g class="favicon-color" stroke-linecap="round" stroke-linejoin="round" stroke-width="0.75" fill="none">
+    <!-- Main horizontal line -->
+    <path d="M1 8h9" />
+    <!-- Right node -->
+    <circle cx="12" cy="6.5" r="0.8" />
+    <!-- Vertical indicators on left -->
+    <path d="M2 6.5v-1M2 9.5v1" />
+    <!-- Top section -->
+    <path d="M4 4h3" />
+    <!-- Bottom section -->
+    <path d="M5 12h3" />
+    <!-- Right connection -->
+    <path d="M12 7v1.5" />
+  </g>
+</svg>

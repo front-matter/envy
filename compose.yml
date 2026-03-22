@@ -128,8 +128,8 @@ services:
   proxy:
     image: caddy:2.10
     profiles: [ dev, staging ]
-  # Describes search service configuration. For details see
-  # https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
+  # Describes search service configuration.
+  # Link: https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
   search:
     image: opensearchproject/opensearch:2.18.0
     environment:

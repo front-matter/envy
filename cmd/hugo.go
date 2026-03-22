@@ -624,8 +624,6 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "profiles", "Profiles")
 		case "profilesDescription":
 			return localizedString(language, "generatedProfilesDescription", "Auto-generated profile reference from compose.yml.")
-		case "profileNoVariables":
-			return localizedString(language, "profileNoVariables", "No profiles have been defined.")
 		case "setDescriptionFallback":
 			return localizedString(language, "setConfiguration", "Set configuration")
 		case "setNoVariables":
@@ -1018,9 +1016,6 @@ func generateProfilesIndexMarkdown(m *compose.Project, language string) string {
 	}))
 
 	profiles := projectProfiles(m)
-	if len(profiles) == 0 {
-		body.WriteString(renderInfoCallout(generatedPageString(language, "profileNoVariables")))
-	}
 
 	body.WriteString(renderCardsOpen(3))
 	body.WriteString(renderProfileCard("none", "/profiles/none/"))
@@ -1043,9 +1038,19 @@ func generateProfileMarkdown(m *compose.Project, profile, language string) strin
 		"toc":       false,
 	}))
 
+	// Show the selected profile at the top in a full-width card.
+	body.WriteString(renderCardsOpen(1))
+	body.WriteString(renderCardWithTagIconOptions(profile, "", "profile", "", "", "", "", "", "", "", "", ""))
+	body.WriteString(renderCardsClose())
+	body.WriteString("\n")
+
 	services := servicesForProfile(m, profile)
 	if strings.TrimSpace(profile) == "none" {
 		services = servicesWithoutProfiles(m)
+	} else {
+		// For regular profiles, also include services without any profiles
+		servicesWithout := servicesWithoutProfiles(m)
+		services = append(services, servicesWithout...)
 	}
 	if len(services) == 0 {
 		return body.String()
@@ -1084,7 +1089,7 @@ func generateServiceMarkdown(m *compose.Project, service compose.Service, langua
 	for _, variable := range vars {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
-		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), false, language))
+		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), true, language))
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}

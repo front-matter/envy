@@ -127,6 +127,15 @@
       {{- end -}}
       <div class="{{ $subtitleClass }}">{{- $description | markdownify -}}</div>
     {{- end -}}
+    {{- with $descriptionLink -}}
+      {{- $readmeLabel := i18n "readme" | default "More info" -}}
+      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">
+        <a href="{{ $descriptionLink | safeURL }}" class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline"{{ if strings.HasPrefix $descriptionLink "http" }} target="_blank" rel="noreferrer"{{ end }}>
+          {{- partial "utils/icon.html" (dict "name" "readme") -}}
+          <span>{{ $readmeLabel | plainify }}</span>
+        </a>
+      </div>
+    {{- end -}}
     {{- with $dockerImage -}}
       {{- $dockerImageLooksFormatted := or (in $dockerImage "**") (or (in $dockerImage "[") (or (in $dockerImage "<br>") (in $dockerImage "\n"))) -}}
       {{- if and (eq $cardType "service") (not $dockerImageLooksFormatted) -}}
@@ -186,15 +195,6 @@
             {{- end -}}
           {{- end -}}
         </div>
-      </div>
-    {{- end -}}
-    {{- with $descriptionLink -}}
-      {{- $readmeLabel := i18n "readme" | default "More info" -}}
-      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">
-        <a href="{{ $descriptionLink | safeURL }}" class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline"{{ if strings.HasPrefix $descriptionLink "http" }} target="_blank" rel="noreferrer"{{ end }}>
-          {{- partial "utils/icon.html" (dict "name" "readme") -}}
-          <span>{{ $readmeLabel | plainify }}</span>
-        </a>
       </div>
     {{- end -}}
     {{- with $subtitleTag -}}

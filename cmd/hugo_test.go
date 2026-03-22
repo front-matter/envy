@@ -345,11 +345,17 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"title: public",
 		"hideTitle: true",
 		"toc: false",
+		"{{< cards cols=\"1\" >}}",
+		"cardType=\"profile\"",
+		"title=\"public\"",
 		"title=\"web\"",
 		"titleLink=\"/services/web\"",
 		"dockerImage=\"caddy:2.10\"",
 		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
 		"platform=\"linux/amd64\"",
+		"title=\"api\"",
+		"titleLink=\"/services/api\"",
+		"description=`Internal API service.`",
 	}
 	for _, check := range profileChecks {
 		if !strings.Contains(string(profileContent), check) {
@@ -358,9 +364,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	if strings.Contains(string(profileContent), `link="/services/`) {
 		t.Fatalf("expected generated profile service cards to avoid outer service links, got:\n%s", string(profileContent))
-	}
-	if strings.Contains(string(profileContent), `titleLink="/services/api"`) {
-		t.Fatalf("expected generated profile page to exclude services without profiles, got:\n%s", string(profileContent))
 	}
 	if strings.Contains(string(profileContent), `titleLink="/services/worker"`) {
 		t.Fatalf("expected generated profile page to exclude services from other profiles, got:\n%s", string(profileContent))
@@ -374,6 +377,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"title: none",
 		"hideTitle: true",
 		"toc: false",
+		"{{< cards cols=\"1\" >}}",
+		"cardType=\"profile\"",
+		"title=\"none\"",
 		"title=\"api\"",
 		"titleLink=\"/services/api\"",
 		"description=`Internal API service.`",
@@ -416,16 +422,18 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	localizedProfileChecks := []string{
 		"title: public",
+		"{{< cards cols=\"1\" >}}",
+		"cardType=\"profile\"",
+		"title=\"public\"",
 		"title=\"web\"",
 		"titleLink=\"/services/web\"",
+		"title=\"api\"",
+		"titleLink=\"/services/api\"",
 	}
 	for _, check := range localizedProfileChecks {
 		if !strings.Contains(string(localizedProfileContent), check) {
 			t.Fatalf("expected generated localized profile page to contain %q, got:\n%s", check, string(localizedProfileContent))
 		}
-	}
-	if strings.Contains(string(localizedProfileContent), `titleLink="/services/api"`) {
-		t.Fatalf("expected generated localized profile page to exclude services without profiles, got:\n%s", string(localizedProfileContent))
 	}
 
 	localizedNoneProfileContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "none.de.md"))
@@ -434,6 +442,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	localizedNoneProfileChecks := []string{
 		"title: none",
+		"{{< cards cols=\"1\" >}}",
+		"cardType=\"profile\"",
+		"title=\"none\"",
 		"title=\"api\"",
 		"titleLink=\"/services/api\"",
 	}
@@ -974,9 +985,6 @@ func TestPrepareBuildContentDirGeneratesProfilesIndexWhenNoProfilesExist(t *test
 	if err != nil {
 		t.Fatalf("ReadFile(profiles/_index.md): %v", err)
 	}
-	if !strings.Contains(string(profilesIndexContent), "No profiles have been defined.") {
-		t.Fatalf("expected generated profiles index to contain empty-state callout text, got:\n%s", string(profilesIndexContent))
-	}
 	if !strings.Contains(string(profilesIndexContent), `title="none"`) || !strings.Contains(string(profilesIndexContent), `link="/profiles/none/"`) {
 		t.Fatalf("expected generated profiles index to include none card, got:\n%s", string(profilesIndexContent))
 	}
@@ -995,9 +1003,6 @@ func TestPrepareBuildContentDirGeneratesProfilesIndexWhenNoProfilesExist(t *test
 	localizedProfilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.de.md"))
 	if err != nil {
 		t.Fatalf("ReadFile(profiles/_index.de.md): %v", err)
-	}
-	if !strings.Contains(string(localizedProfilesIndexContent), "Es wurden keine Profile definiert.") {
-		t.Fatalf("expected localized generated profiles index to contain empty-state callout text, got:\n%s", string(localizedProfilesIndexContent))
 	}
 	if !strings.Contains(string(localizedProfilesIndexContent), `title="none"`) || !strings.Contains(string(localizedProfilesIndexContent), `link="/profiles/none/"`) {
 		t.Fatalf("expected localized generated profiles index to include none card, got:\n%s", string(localizedProfilesIndexContent))
