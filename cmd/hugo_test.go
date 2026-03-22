@@ -242,7 +242,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"hide: true",
 		"name: Services",
 		"title=\"web\"",
-		"link=\"/services/web\"",
+		"titleLink=\"/services/web\"",
 		"cardType=\"service\"",
 		"dockerImage=\"caddy:2.10\"",
 		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
@@ -256,6 +256,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		if !strings.Contains(string(servicesIndexContent), check) {
 			t.Fatalf("expected generated services index to contain %q, got:\n%s", check, string(servicesIndexContent))
 		}
+	}
+	if strings.Contains(string(servicesIndexContent), `link="/services/`) {
+		t.Fatalf("expected generated services index cards to avoid outer service links, got:\n%s", string(servicesIndexContent))
 	}
 
 	localizedServicesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "services", "_index.de.md"))
@@ -274,6 +277,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		if !strings.Contains(string(localizedServicesIndexContent), check) {
 			t.Fatalf("expected generated localized services index to contain %q, got:\n%s", check, string(localizedServicesIndexContent))
 		}
+	}
+	if strings.Contains(string(localizedServicesIndexContent), `link="/services/`) {
+		t.Fatalf("expected generated localized services index cards to avoid outer service links, got:\n%s", string(localizedServicesIndexContent))
 	}
 
 	profilesIndexContent, err := os.ReadFile(filepath.Join(contentDir, "profiles", "_index.md"))
@@ -306,7 +312,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"hideTitle: true",
 		"toc: false",
 		"title=\"web\"",
-		"link=\"/services/web\"",
+		"titleLink=\"/services/web\"",
 		"dockerImage=\"caddy:2.10\"",
 		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
 		"platform=\"linux/amd64\"",
@@ -316,10 +322,13 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			t.Fatalf("expected generated profile page to contain %q, got:\n%s", check, string(profileContent))
 		}
 	}
-	if strings.Contains(string(profileContent), `link="/services/api"`) {
+	if strings.Contains(string(profileContent), `link="/services/`) {
+		t.Fatalf("expected generated profile service cards to avoid outer service links, got:\n%s", string(profileContent))
+	}
+	if strings.Contains(string(profileContent), `titleLink="/services/api"`) {
 		t.Fatalf("expected generated profile page to exclude services without profiles, got:\n%s", string(profileContent))
 	}
-	if strings.Contains(string(profileContent), `link="/services/worker"`) {
+	if strings.Contains(string(profileContent), `titleLink="/services/worker"`) {
 		t.Fatalf("expected generated profile page to exclude services from other profiles, got:\n%s", string(profileContent))
 	}
 
@@ -332,7 +341,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"hideTitle: true",
 		"toc: false",
 		"title=\"api\"",
-		"link=\"/services/api\"",
+		"titleLink=\"/services/api\"",
 		"description=`Internal API service.`",
 		"dockerImage=\"nginx:1.27\"",
 		"dockerImageLink=\"https://hub.docker.com/_/nginx\"",
@@ -342,10 +351,13 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			t.Fatalf("expected generated none profile page to contain %q, got:\n%s", check, string(noneProfileContent))
 		}
 	}
-	if strings.Contains(string(noneProfileContent), `link="/services/web"`) {
+	if strings.Contains(string(noneProfileContent), `link="/services/`) {
+		t.Fatalf("expected generated none-profile service cards to avoid outer service links, got:\n%s", string(noneProfileContent))
+	}
+	if strings.Contains(string(noneProfileContent), `titleLink="/services/web"`) {
 		t.Fatalf("expected generated none profile page to exclude profiled services, got:\n%s", string(noneProfileContent))
 	}
-	if strings.Contains(string(noneProfileContent), `link="/services/worker"`) {
+	if strings.Contains(string(noneProfileContent), `titleLink="/services/worker"`) {
 		t.Fatalf("expected generated none profile page to exclude services from other profiles, got:\n%s", string(noneProfileContent))
 	}
 
@@ -371,14 +383,14 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	localizedProfileChecks := []string{
 		"title: public",
 		"title=\"web\"",
-		"link=\"/services/web\"",
+		"titleLink=\"/services/web\"",
 	}
 	for _, check := range localizedProfileChecks {
 		if !strings.Contains(string(localizedProfileContent), check) {
 			t.Fatalf("expected generated localized profile page to contain %q, got:\n%s", check, string(localizedProfileContent))
 		}
 	}
-	if strings.Contains(string(localizedProfileContent), `link="/services/api"`) {
+	if strings.Contains(string(localizedProfileContent), `titleLink="/services/api"`) {
 		t.Fatalf("expected generated localized profile page to exclude services without profiles, got:\n%s", string(localizedProfileContent))
 	}
 
@@ -389,7 +401,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	localizedNoneProfileChecks := []string{
 		"title: none",
 		"title=\"api\"",
-		"link=\"/services/api\"",
+		"titleLink=\"/services/api\"",
 	}
 	for _, check := range localizedNoneProfileChecks {
 		if !strings.Contains(string(localizedNoneProfileContent), check) {
@@ -942,7 +954,7 @@ func TestPrepareBuildContentDirGeneratesProfilesIndexWhenNoProfilesExist(t *test
 	if err != nil {
 		t.Fatalf("ReadFile(profiles/none.md): %v", err)
 	}
-	if !strings.Contains(string(noneProfileContent), `link="/services/web"`) {
+	if !strings.Contains(string(noneProfileContent), `titleLink="/services/web"`) {
 		t.Fatalf("expected none profile page to list services without profiles, got:\n%s", string(noneProfileContent))
 	}
 

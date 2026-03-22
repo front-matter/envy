@@ -1138,7 +1138,7 @@ func renderServiceCard(service compose.Service, language string, titleLink strin
 		escapeShortcodeValue(service.Name),
 	))
 	if strings.TrimSpace(titleLink) != "" {
-		sb.WriteString(fmt.Sprintf(" link=\"%s\"", escapeShortcodeValue(titleLink)))
+		sb.WriteString(fmt.Sprintf(" titleLink=\"%s\"", escapeShortcodeValue(titleLink)))
 	}
 	sb.WriteString(" cardType=\"service\"")
 
