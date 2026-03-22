@@ -48,7 +48,7 @@ Commands:
   completion  Generate shell completion scripts
 
 Global flags:
-  -m, --manifest string   Path to compose.yaml (auto-detected if not given)
+  -f, --file string       Path to compose file (auto-detected if not given)
   -v, --version           version for envy
 ```
 
@@ -115,7 +115,7 @@ envy deploy --target production
 
 ## compose.yaml format
 
-`envy` reads a single `compose.yaml` manifest as its source of truth:
+`envy` reads a single `compose.yaml` file as its source of truth:
 
 ```yaml
 x-envy:

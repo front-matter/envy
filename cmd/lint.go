@@ -29,7 +29,7 @@ invalid service-to-set references.
 
 Examples:
   envy lint
-  envy lint --manifest ./compose.yaml`,
+	envy lint --file ./compose.yaml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ruleguardOutput, ruleguardErr := ruleguardRunner()
 

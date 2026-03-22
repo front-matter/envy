@@ -63,7 +63,7 @@ func init() {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(
-		&manifestPath, "manifest", "m", "",
-		"Path to compose manifest (auto-detected: compose.yml, compose.yaml, docker-compose.yml, docker-compose.yaml)",
+		&manifestPath, "file", "f", "",
+		"Path to compose file (auto-detected: compose.yml, compose.yaml, docker-compose.yml, docker-compose.yaml)",
 	)
 }

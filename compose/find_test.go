@@ -106,4 +106,10 @@ func TestFindReturnsHelpfulError(t *testing.T) {
 			t.Fatalf("error %q does not mention %q", msg, expected)
 		}
 	}
+	if !strings.Contains(msg, "--file") {
+		t.Fatalf("error %q does not mention --file", msg)
+	}
+	if strings.Contains(msg, "--manifest") {
+		t.Fatalf("error %q should not mention deprecated --manifest flag", msg)
+	}
 }
