@@ -1,0 +1,8 @@
+{{- if site.Params.envyEditor.enabled -}}
+{{- $htmx := resources.Get "js/htmx.min.js" | fingerprint -}}
+{{- $envyEditor := resources.Get "js/envy-editor.js" | fingerprint -}}
+{{- $alpine := resources.Get "js/alpine.min.js" | fingerprint -}}
+<script src="{{ $htmx.RelPermalink }}" defer></script>
+<script src="{{ $envyEditor.RelPermalink }}" defer></script>
+<script src="{{ $alpine.RelPermalink }}" defer></script>
+{{- end -}}
