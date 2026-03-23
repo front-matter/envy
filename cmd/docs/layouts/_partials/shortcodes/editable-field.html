@@ -1,0 +1,83 @@
+{{- $fieldID := .fieldID -}}
+{{- $apiPath := .apiPath -}}
+{{- $field := .field -}}
+{{- $pageRelPermalink := .pageRelPermalink | default "" -}}
+{{- $key := .key | default "" -}}
+{{- $bindKeyToDisplay := .bindKeyToDisplay | default false -}}
+{{- $initialValue := .value | default "" -}}
+{{- $displayClass := .displayClass | default "" -}}
+{{- $inputClass := .inputClass | default $displayClass -}}
+{{- $wrapperClass := .wrapperClass | default "" -}}
+{{- $ariaLabel := .ariaLabel | default (printf "Edit %s" $field) -}}
+{{- $rows := .rows | default 1 -}}
+{{- $emptyDisplay := .emptyDisplay | default "-" -}}
+{{- $deleteOnEmptySubmit := .deleteOnEmptySubmit | default false -}}
+{{- $deleteEntityLabel := .deleteEntityLabel | default "item" -}}
+{{- $deleteApiBase := .deleteApiBase | default "" -}}
+{{- $deleteSection := .deleteSection | default "" -}}
+{{- $deleteUseAlpineModal := .deleteUseAlpineModal | default false -}}
+
+{{- if $apiPath -}}
+<div class="{{ $wrapperClass }}">
+  <form
+    id="{{ $fieldID }}-form"
+    class="hx:space-y-2"
+    x-data='envyEditor({"initialValue": {{ $initialValue | jsonify }}, "field": {{ $field | jsonify }}, "deleteOnEmptySubmit": {{ $deleteOnEmptySubmit | jsonify }}, "deleteEntityLabel": {{ $deleteEntityLabel | jsonify }}, "deleteApiBase": {{ $deleteApiBase | jsonify }}, "deleteSection": {{ $deleteSection | jsonify }}, "deleteUseAlpineModal": {{ $deleteUseAlpineModal | jsonify }}})'
+    x-ref="form"
+    hx-post="{{ $apiPath }}"
+    hx-swap="none"
+  >
+    <input type="hidden" name="field" value="{{ $field }}" x-bind:value="currentField" />
+    <input type="hidden" name="page" value="{{ $pageRelPermalink }}" />
+    {{- if $key -}}
+      <input type="hidden" name="key" value="{{ $key }}"{{ if $bindKeyToDisplay }} x-bind:value="displayValue"{{ end }} />
+    {{- end -}}
+    <div
+      id="{{ $fieldID }}-display"
+      class="{{ $displayClass }}"
+      role="button"
+      tabindex="0"
+      aria-label="{{ $ariaLabel }}"
+      x-bind:class="flashClasses()"
+      x-show="!isEditing"
+      x-on:click="enterEdit()"
+      x-on:keydown.enter.prevent="enterEdit()"
+      x-on:keydown.space.prevent="enterEdit()"
+      x-text="displayValue || {{ $emptyDisplay | jsonify }}"
+    ></div>
+    <div id="{{ $fieldID }}-editor" x-show="isEditing">
+      <textarea
+        id="{{ $fieldID }}-value"
+        name="value"
+        rows="{{ $rows }}"
+        class="{{ $inputClass }}"
+        x-ref="input"
+        x-model="draftValue"
+        x-bind:class="flashClasses()"
+        spellcheck="false"
+        x-on:blur="handleBlur()"
+        x-on:keydown.enter="if(!$event.shiftKey){$event.preventDefault(); submitEdit()}"
+        x-on:keydown.escape.prevent="cancelEdit()"
+      ></textarea>
+    </div>
+    {{- if $deleteUseAlpineModal -}}
+      <template x-if="isDeleteModalOpen">
+        <div class="hx:fixed hx:inset-0 hx:z-50 hx:flex hx:items-center hx:justify-center hx:bg-black/50 hx:p-4" x-on:click.self="closeDeleteModal()" x-on:keydown.escape.window="closeDeleteModal()">
+          <div class="hx:w-full hx:max-w-md hx:rounded-lg hx:bg-white hx:p-6 hx:shadow-xl hx:dark:bg-neutral-900 hx:dark:text-neutral-100">
+            <h3 class="hx:text-lg hx:font-semibold" x-text="`Delete this {{ $deleteEntityLabel }}?`"></h3>
+            <p class="hx:mt-3 hx:text-sm hx:text-gray-600 hx:dark:text-gray-300" x-text='`This will permanently remove "${(displayValue || "").trim()}". This action cannot be undone.`'></p>
+            <div class="hx:mt-6 hx:flex hx:justify-end hx:gap-3">
+              <button type="button" class="hx:rounded-md hx:border hx:border-gray-300 hx:px-3 hx:py-2 hx:text-sm hx:font-medium hx:text-gray-700 hover:hx:bg-gray-50 hx:dark:border-neutral-700 hx:dark:text-neutral-200 hx:dark:hover:bg-neutral-800" x-ref="cancelBtn" x-init="$nextTick(() => $refs.cancelBtn.focus())" x-on:click="closeDeleteModal()">
+                Cancel
+              </button>
+              <button type="button" class="hx:rounded-md hx:bg-red-600 hx:px-3 hx:py-2 hx:text-sm hx:font-medium hx:text-white hover:hx:bg-red-700" x-on:click="confirm()">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+    {{- end -}}
+  </form>
+</div>
+{{- end -}}

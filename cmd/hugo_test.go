@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"errors"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,18 +195,18 @@ func TestComposeManifestChangedDetectsSizeChange(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	prev, err := composeManifestState(path)
+	prev, err := manifestState(path)
 	if err != nil {
-		t.Fatalf("composeManifestState() error = %v", err)
+		t.Fatalf("manifestState() error = %v", err)
 	}
 
 	if err := os.WriteFile(path, []byte("x-envy:\n  title: Example Updated\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(updated) error = %v", err)
 	}
 
-	changed, _, err := composeManifestChanged(path, prev)
+	changed, _, err := manifestChanged(path, prev)
 	if err != nil {
-		t.Fatalf("composeManifestChanged() error = %v", err)
+		t.Fatalf("manifestChanged() error = %v", err)
 	}
 	if !changed {
 		t.Fatalf("expected size change to be detected")
@@ -216,20 +220,1262 @@ func TestComposeManifestChangedNoChange(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	prev, err := composeManifestState(path)
+	prev, err := manifestState(path)
 	if err != nil {
-		t.Fatalf("composeManifestState() error = %v", err)
+		t.Fatalf("manifestState() error = %v", err)
 	}
 
 	// Ensure filesystem timestamp can advance if needed on slower timestamp resolutions.
 	time.Sleep(10 * time.Millisecond)
 
-	changed, _, err := composeManifestChanged(path, prev)
+	changed, _, err := manifestChanged(path, prev)
 	if err != nil {
-		t.Fatalf("composeManifestChanged() error = %v", err)
+		t.Fatalf("manifestChanged() error = %v", err)
 	}
 	if changed {
 		t.Fatalf("expected no change to be detected")
+	}
+}
+
+func TestUpdateComposeServiceFieldInManifest(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  # old description\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateServiceFieldInManifest(path, "db", "description", "updated description"); err != nil {
+		t.Fatalf("updateServiceFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "# updated description") {
+		t.Fatalf("expected updated service description, got:\n%s", updated)
+	}
+}
+
+func TestUpdateComposeServiceFieldInManifestRenamesService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  # db description\n  db:\n    image: postgres:17\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateServiceFieldInManifest(path, "db", "name", "database"); err != nil {
+		t.Fatalf("updateServiceFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "database:") {
+		t.Fatalf("expected renamed service key, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "\ndb:\n") || strings.Contains(updatedContent, "\n    db:\n") {
+		t.Fatalf("expected old service key to be gone, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "# db description") {
+		t.Fatalf("expected service comments to remain attached, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateComposeServiceFieldInManifestRejectsSlugCollision(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  db:\n    image: postgres:17\n  my-service:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := updateServiceFieldInManifest(path, "db", "name", "my service")
+	if err == nil {
+		t.Fatalf("expected service rename collision error")
+	}
+	if !strings.Contains(err.Error(), "conflicts with existing service") {
+		t.Fatalf("expected collision message, got: %v", err)
+	}
+}
+
+func TestUpdateComposeSetFieldInManifest(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("# old description\n# Link: https://old.example.org\nx-set-mail: &mail\n  MAIL_HOST: localhost\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*mail]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "mail", "link", "https://new.example.org"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "# Link: https://new.example.org") {
+		t.Fatalf("expected updated set link, got:\n%s", updated)
+	}
+}
+
+func TestUpdateComposeSetFieldInManifestRenamesSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	// The anchor (&mail) and alias (*mail) should both be updated on rename.
+	content := []byte("# Mail description\nx-set-mail: &mail\n  MAIL_HOST: localhost\nx-set-cache: &cache\n  CACHE_URL: redis://localhost\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*mail]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "mail", "name", "smtp"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "x-set-smtp:") {
+		t.Fatalf("expected renamed set key, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "x-set-mail:") {
+		t.Fatalf("expected old set key to be gone, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "# Mail description") {
+		t.Fatalf("expected set comments to remain attached, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "x-set-cache:") {
+		t.Fatalf("expected unrelated set to be unchanged, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateComposeSetFieldInManifestRejectsSlugCollision(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-mail: &mail\n  MAIL_HOST: localhost\nx-set-my-cache: &my-cache\n  CACHE_URL: redis://localhost\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := updateSetFieldInManifest(path, "mail", "name", "my cache")
+	if err == nil {
+		t.Fatalf("expected set rename collision error")
+	}
+	if !strings.Contains(err.Error(), "conflicts with existing set") {
+		t.Fatalf("expected collision message, got: %v", err)
+	}
+}
+
+func TestComposeSetAPIHandlerRedirectsAfterRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-mail: &mail\n  MAIL_HOST: localhost\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*mail]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "name")
+	form.Set("page", "/sets/mail/")
+	form.Set("key", "mail")
+	form.Set("value", "smtp")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sets", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("setAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/sets/smtp/" {
+		t.Fatalf("setAPIHandler() HX-Redirect = %q, want %q", got, "/sets/smtp/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "x-set-smtp:") {
+		t.Fatalf("expected renamed set in manifest, got:\n%s", updated)
+	}
+}
+
+func TestDeleteSetFromManifestRemovesSetAndAliases(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  BASE_VAR: value\nx-set-authentication: &authentication\n  AUTH_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*base, *authentication]\n  worker:\n    image: busybox\n    environment:\n      <<: [*base]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := deleteSetFromManifest(path, "base"); err != nil {
+		t.Fatalf("deleteSetFromManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "x-set-base:") {
+		t.Fatalf("expected deleted set to be removed, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "*base") {
+		t.Fatalf("expected deleted set aliases to be removed, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "*authentication") {
+		t.Fatalf("expected other set aliases to remain, got:\n%s", updatedContent)
+	}
+}
+
+func TestDeleteSetFromManifestRejectsMissingSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  BASE_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := deleteSetFromManifest(path, "missing")
+	if err == nil {
+		t.Fatal("expected error for missing set")
+	}
+	if !strings.Contains(err.Error(), "set \"missing\" not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAddSetToManifestAddsNewTopLevelSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  BASE_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addSetToManifest(path, "cache"); err != nil {
+		t.Fatalf("addSetToManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "x-set-cache: &cache") {
+		t.Fatalf("expected new set to be added, got:\n%s", updatedContent)
+	}
+	if strings.Index(updatedContent, "x-set-cache:") > strings.Index(updatedContent, "services:") {
+		t.Fatalf("expected new set before services block, got:\n%s", updatedContent)
+	}
+}
+
+func TestAddSetToManifestRejectsDuplicate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-cache: &cache\n  CACHE_URL: redis://localhost\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := addSetToManifest(path, "cache")
+	if err == nil {
+		t.Fatal("expected duplicate set error")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected duplicate message, got: %v", err)
+	}
+}
+
+func TestAddServiceToManifestAddsNewService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addServiceToManifest(path, "worker"); err != nil {
+		t.Fatalf("addServiceToManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "worker:") {
+		t.Fatalf("expected new service to be added, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "busybox:latest") {
+		t.Fatalf("expected new service to get default image, got:\n%s", updatedContent)
+	}
+}
+
+func TestAddServiceToManifestRejectsDuplicate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  my-service:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := addServiceToManifest(path, "my service")
+	if err == nil {
+		t.Fatal("expected duplicate service error")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected duplicate message, got: %v", err)
+	}
+}
+
+func TestDeleteServiceFromManifestRemovesService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := deleteServiceFromManifest(path, "db"); err != nil {
+		t.Fatalf("deleteServiceFromManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "\n    db:\n") {
+		t.Fatalf("expected deleted service to be removed, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "\n    web:\n") {
+		t.Fatalf("expected other services to remain, got:\n%s", updatedContent)
+	}
+}
+
+func TestDeleteServiceFromManifestRejectsMissingService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := deleteServiceFromManifest(path, "missing")
+	if err == nil {
+		t.Fatal("expected error for missing service")
+	}
+	if !strings.Contains(err.Error(), "service \"missing\" not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestServiceAPIHandlerCreatesNewService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "db")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/services/db/" {
+		t.Fatalf("serviceAPIHandler() HX-Redirect = %q, want %q", got, "/services/db/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "\n    db:\n") {
+		t.Fatalf("expected new service in manifest, got:\n%s", updated)
+	}
+}
+
+func TestServiceAPIHandlerCreatesNewServiceWithoutFieldOrPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("value", "db")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/services/db/" {
+		t.Fatalf("serviceAPIHandler() HX-Redirect = %q, want %q", got, "/services/db/")
+	}
+}
+
+func TestComposeServiceAPIHandlerDeletesServiceAndRedirectsToLocalizedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/services/db/?page=/de/services/db/", nil)
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/de/services/" {
+		t.Fatalf("serviceAPIHandler() HX-Redirect = %q, want %q", got, "/de/services/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if strings.Contains(string(updated), "\n    db:\n") {
+		t.Fatalf("expected deleted service to be removed, got:\n%s", updated)
+	}
+}
+
+func TestComposeServiceAPIHandlerDeleteRejectsNonDetailPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/services/db/?page=/services/", nil)
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "service deletion is only allowed from service detail pages") {
+		t.Fatalf("expected detail page error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeServiceAPIHandlerDeleteRejectsMismatchedSlug(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/services/db/?page=/services/web/", nil)
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "service slug does not match service detail page") {
+		t.Fatalf("expected slug mismatch error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeSetAPIHandlerDeletesSetAndRedirectsToLocalizedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-mail: &mail\n  MAIL_HOST: localhost\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*mail]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sets/mail/?page=/de/sets/mail/", nil)
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("setAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/de/sets/" {
+		t.Fatalf("setAPIHandler() HX-Redirect = %q, want %q", got, "/de/sets/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "x-set-mail:") {
+		t.Fatalf("expected deleted set to be removed, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "*mail") {
+		t.Fatalf("expected deleted set alias to be removed, got:\n%s", updatedContent)
+	}
+}
+
+func TestSetAPIHandlerCreatesNewSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  BASE_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "cache")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sets", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("setAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/sets/cache/" {
+		t.Fatalf("setAPIHandler() HX-Redirect = %q, want %q", got, "/sets/cache/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "x-set-cache: &cache") {
+		t.Fatalf("expected new set in manifest, got:\n%s", updated)
+	}
+}
+
+func TestSetAPIHandlerCreatesNewSetWithoutFieldOrPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  BASE_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("value", "cache")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sets", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("setAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/sets/cache/" {
+		t.Fatalf("setAPIHandler() HX-Redirect = %q, want %q", got, "/sets/cache/")
+	}
+}
+
+func TestSetAPIHandlerCreateRejectsDuplicate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-cache: &cache\n  CACHE_URL: redis://localhost\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "cache")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sets", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("setAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+}
+
+func TestComposeSetAPIHandlerDeleteRejectsNonDetailPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-mail: &mail\n  MAIL_HOST: localhost\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sets/mail/?page=/sets/", nil)
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("setAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "set deletion is only allowed from set detail pages") {
+		t.Fatalf("expected detail page error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeSetAPIHandlerDeleteRejectsMismatchedSlug(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-mail: &mail\n  MAIL_HOST: localhost\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/sets/mail/?page=/sets/cache/", nil)
+	resp := httptest.NewRecorder()
+
+	setAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("setAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "set slug does not match set detail page") {
+		t.Fatalf("expected slug mismatch error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeProfileAPIHandlerRejectsRenameForNoneProfile(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "name")
+	form.Set("page", "/profiles/none/")
+	form.Set("key", "none")
+	form.Set("value", "default")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "profile \"none\" is virtual and cannot be renamed or deleted") {
+		t.Fatalf("expected virtual profile error, got: %s", resp.Body.String())
+	}
+}
+
+func TestAddProfileToManifestAddsToExistingProfilesSequence(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addProfileToManifest(path, "staging"); err != nil {
+		t.Fatalf("addProfileToManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "- staging") {
+		t.Fatalf("expected new profile in manifest, got:\n%s", updated)
+	}
+}
+
+func TestAddProfileToManifestAddsToFirstServiceWhenNoProfiles(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addProfileToManifest(path, "dev"); err != nil {
+		t.Fatalf("addProfileToManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "- dev") {
+		t.Fatalf("expected new profile in manifest, got:\n%s", updated)
+	}
+}
+
+func TestAddProfileToManifestRejectsDuplicate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := addProfileToManifest(path, "dev")
+	if err == nil {
+		t.Fatal("addProfileToManifest() expected error for duplicate profile")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected 'already exists' error, got: %v", err)
+	}
+}
+
+func TestAddProfileToManifestRejectsNoneName(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addProfileToManifest(path, "none"); err == nil {
+		t.Fatal("addProfileToManifest() expected error for reserved name 'none'")
+	}
+}
+
+func TestProfileAPIHandlerCreatesNewProfile(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "staging")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/profiles/staging/" {
+		t.Fatalf("profileAPIHandler() HX-Redirect = %q, want %q", got, "/profiles/staging/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "- staging") {
+		t.Fatalf("expected new profile in manifest, got:\n%s", updated)
+	}
+}
+
+func TestProfileAPIHandlerCreateRejectsDuplicate(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "dev")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+}
+
+func TestProfileAPIHandlerCreatesNewProfileWithoutFieldOrPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("value", "staging")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/profiles/staging/" {
+		t.Fatalf("profileAPIHandler() HX-Redirect = %q, want %q", got, "/profiles/staging/")
+	}
+}
+
+func TestProfileAPIHandlerCreateMultipartRequest(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	body := &strings.Builder{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("field", "create"); err != nil {
+		t.Fatalf("WriteField(field) error = %v", err)
+	}
+	if err := writer.WriteField("value", "staging"); err != nil {
+		t.Fatalf("WriteField(value) error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() multipart writer error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(body.String()))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+}
+
+func TestProfileAPIHandlerCreatesNewProfileRunsRefreshHook(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "create")
+	form.Set("value", "staging")
+
+	called := false
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path, func() error {
+		called = true
+		return nil
+	}).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d; body: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	if !called {
+		t.Fatal("expected refresh hook to be called")
+	}
+}
+
+func TestUpdateComposeSetFieldInManifestRenamesBaseInComposeLikeManifest(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-envy:\n  HUGO_TITLE: Example\n\n# Base defines shared environment variables.\n# Link: https://example.org/base\nx-set-base: &base\n  BASE_VAR: value\nx-set-authentication: &authentication\n  AUTH_VAR: value\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      !!merge <<: [*base, *authentication]\n  worker:\n    image: busybox\n    environment:\n      !!merge <<: [*base]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "base", "name", "common"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "x-set-common:") {
+		t.Fatalf("expected renamed base key, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "x-set-base:") {
+		t.Fatalf("expected old base key to be removed, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateComposeSetFieldMultiAliasRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  FOO: bar\nx-set-cache: &cache\n  BAR: baz\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      <<: [*base, *cache]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "base", "name", "common"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "x-set-common:") {
+		t.Fatalf("expected renamed set key, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "x-set-base:") {
+		t.Fatalf("expected old set key to be gone, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "x-set-cache:") {
+		t.Fatalf("expected unrelated set to remain, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateComposeSetFieldWithMergeTagRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	// Uses !!merge <<: syntax as found in the real compose.yml
+	content := []byte("x-set-base: &base\n  FOO: bar\nx-set-cache: &cache\n  BAR: baz\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      !!merge <<: [*base, *cache]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "base", "name", "common"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "x-set-common:") {
+		t.Fatalf("expected renamed set key, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "x-set-base:") {
+		t.Fatalf("expected old set key to be gone, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateComposeSetFieldFirstSetAfterBlankLine(t *testing.T) {
+	// Reproduces the real compose.yml structure: x-set-base follows x-envy with a blank line before its comment.
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-envy:\n  HUGO_TITLE: Example\n\n# Base description\n# Link: https://old.example.org\nx-set-base: &base\n  FOO: bar\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      !!merge <<: [*base]\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "base", "link", "https://new.example.org"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() link error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "https://new.example.org") {
+		t.Fatalf("expected updated link, got:\n%s", updated)
+	}
+}
+
+func TestUpdateComposeProfileFieldInManifest(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n      - staging\n  worker:\n    image: ghcr.io/example/worker:latest\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateProfileFieldInManifest(path, "dev", "name", "development"); err != nil {
+		t.Fatalf("updateProfileFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "- development") {
+		t.Fatalf("expected sequence profile to be renamed, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "\n            - dev\n") {
+		t.Fatalf("expected old profile name to be gone, got:\n%s", updatedContent)
+	}
+}
+
+func TestDeleteProfileFromManifestRemovesProfileReferences(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n      - staging\n  worker:\n    image: ghcr.io/example/worker:latest\n    profiles: dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := deleteProfileFromManifest(path, "dev"); err != nil {
+		t.Fatalf("deleteProfileFromManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "- dev") {
+		t.Fatalf("expected sequence profile to be removed, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "profiles: dev") {
+		t.Fatalf("expected scalar profile to be removed, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "- staging") {
+		t.Fatalf("expected other profile to remain, got:\n%s", updatedContent)
+	}
+}
+
+func TestDeleteProfileFromManifestRejectsMissingProfile(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := deleteProfileFromManifest(path, "staging")
+	if err == nil {
+		t.Fatal("expected error for missing profile")
+	}
+	if !strings.Contains(err.Error(), "profile \"staging\" not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdatedEntityPagePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		pagePath string
+		section  string
+		newSlug  string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "profile page",
+			pagePath: "/profiles/dev/",
+			section:  "profiles",
+			newSlug:  "development",
+			want:     "/profiles/development/",
+		},
+		{
+			name:     "localized profile page",
+			pagePath: "/de/profiles/dev/",
+			section:  "profiles",
+			newSlug:  "entwicklung",
+			want:     "/de/profiles/entwicklung/",
+		},
+		{
+			name:     "wrong section",
+			pagePath: "/services/db/",
+			section:  "profiles",
+			newSlug:  "development",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := updatedEntityPagePath(tt.pagePath, tt.section, tt.newSlug)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("updatedEntityPagePath(%q, %q, %q) expected error", tt.pagePath, tt.section, tt.newSlug)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("updatedEntityPagePath(%q, %q, %q) error = %v", tt.pagePath, tt.section, tt.newSlug, err)
+			}
+			if got != tt.want {
+				t.Fatalf("updatedEntityPagePath(%q, %q, %q) = %q, want %q", tt.pagePath, tt.section, tt.newSlug, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComposeProfileAPIHandlerRedirectsAfterRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "name")
+	form.Set("page", "/profiles/dev/")
+	form.Set("key", "dev")
+	form.Set("value", "development")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/profiles/development/" {
+		t.Fatalf("profileAPIHandler() HX-Redirect = %q, want %q", got, "/profiles/development/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "- development") {
+		t.Fatalf("expected renamed profile in manifest, got:\n%s", updated)
+	}
+}
+
+func TestComposeProfileAPIHandlerDeletesProfileAndRedirectsToLocalizedIndex(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n      - staging\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/profiles/dev/?page=/de/profiles/dev/", nil)
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/de/profiles/" {
+		t.Fatalf("profileAPIHandler() HX-Redirect = %q, want %q", got, "/de/profiles/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "- dev") {
+		t.Fatalf("expected deleted profile to be removed, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "- staging") {
+		t.Fatalf("expected remaining profile to be preserved, got:\n%s", updatedContent)
+	}
+}
+
+func TestComposeProfileAPIHandlerDeleteRejectsNonDetailPage(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/profiles/dev/?page=/profiles/", nil)
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "profile deletion is only allowed from profile detail pages") {
+		t.Fatalf("expected detail page error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeProfileAPIHandlerDeleteRejectsMismatchedSlug(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  web:\n    image: caddy:2.10\n    profiles:\n      - dev\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/profiles/dev/?page=/profiles/staging/", nil)
+	resp := httptest.NewRecorder()
+
+	profileAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("profileAPIHandler() status = %d, want %d", resp.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(resp.Body.String(), "profile slug does not match profile detail page") {
+		t.Fatalf("expected slug mismatch error, got: %s", resp.Body.String())
+	}
+}
+
+func TestComposeServiceAPIHandlerRedirectsAfterRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("services:\n  db:\n    image: postgres:17\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("field", "name")
+	form.Set("page", "/services/db/")
+	form.Set("key", "db")
+	form.Set("value", "database")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/services", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp := httptest.NewRecorder()
+
+	serviceAPIHandler(path).ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("serviceAPIHandler() status = %d, want %d", resp.Code, http.StatusNoContent)
+	}
+	if got := resp.Header().Get("HX-Redirect"); got != "/services/database/" {
+		t.Fatalf("serviceAPIHandler() HX-Redirect = %q, want %q", got, "/services/database/")
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	if !strings.Contains(string(updated), "database:") {
+		t.Fatalf("expected renamed service in manifest, got:\n%s", updated)
 	}
 }
 
@@ -426,6 +1672,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"title: Services",
 		"hide: true",
 		"name: Services",
+		"{{< add-service >}}",
 		"title=\"web\"",
 		"titleLink=\"/services/web\"",
 		"cardType=\"service\"",
@@ -901,7 +2148,7 @@ func TestSyncBuildAssetsPreservesEmbeddedIcons(t *testing.T) {
 		t.Fatalf("WriteFile(compose.yml): %v", err)
 	}
 
-	siteDir, err := prepareBuildAssets(manifestPath, false)
+	siteDir, err := prepareBuildAssets(manifestPath, false, "")
 	if err != nil {
 		t.Fatalf("prepareBuildAssets(): %v", err)
 	}
@@ -912,7 +2159,7 @@ func TestSyncBuildAssetsPreservesEmbeddedIcons(t *testing.T) {
 		t.Fatalf("expected embedded icons to exist before sync, err=%v", err)
 	}
 
-	if err := syncBuildAssets(manifestPath, siteDir, false); err != nil {
+	if err := syncBuildAssets(manifestPath, siteDir, false, ""); err != nil {
 		t.Fatalf("syncBuildAssets(): %v", err)
 	}
 
@@ -935,7 +2182,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 		},
 	}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir, "https://github.com/front-matter/envy"); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "https://github.com/front-matter/envy", ""); err != nil {
 		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
 	}
 
@@ -1073,7 +2320,7 @@ func TestWriteTempHugoConfigFromManifestIncludesProfilesMenuWhenProfilesExist(t 
 		}},
 	}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "", ""); err != nil {
 		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
 	}
 
@@ -1116,7 +2363,7 @@ func TestWriteTempHugoConfigFromManifestAlwaysIncludesProfilesMenu(t *testing.T)
 	siteDir := t.TempDir()
 	m := &compose.Project{}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "", ""); err != nil {
 		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
 	}
 
@@ -1276,7 +2523,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMultilanguage(t *testing.T) {
 		},
 	}
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir, ""); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "", ""); err != nil {
 		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
 	}
 

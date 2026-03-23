@@ -1,15 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html"
 	"io"
 	"io/fs"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +28,19 @@ import (
 )
 
 const hugoModuleVersion = "github.com/gohugoio/hugo@v0.156.0"
+
+const envyWatchProxyBind = "127.0.0.1:1313"
+const envyInternalHugoBind = "127.0.0.1"
+const envyInternalHugoPort = "1314"
+const envyWatchPublicURL = "http://localhost:1313"
+const internalHugoServerMessage = "Web Server is available at //localhost:1314/ (bind address 127.0.0.1)"
+const publicEnvyServerMessage = "Web Server is available at //localhost:1313/ (bind address 127.0.0.1)"
+const hugoFastRenderMessage = "Running in Fast Render Mode. For full rebuilds on change: hugo server --disableFastRender"
+const envyFastRenderMessage = "Running in Fast Render Mode. For full rebuilds on change: envy server --disableFastRender"
+
+var composeInterpolationPatternLocal = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])(.*))?\}$`)
+var editorPrefixedLinkPattern = regexp.MustCompile(`(?i)^link:\s*(https?://\S+)$`)
+var editorPlainLinkPattern = regexp.MustCompile(`^https?://\S+$`)
 
 var (
 	docsI18nOnce sync.Once
@@ -103,7 +121,7 @@ func runHugoCommand(subcommand string, args []string) error {
 			}
 		}
 
-		buildSiteDir, err = prepareBuildAssets(manifestFilePath, refreshPersistentContent)
+		buildSiteDir, err = prepareBuildAssets(manifestFilePath, refreshPersistentContent, "")
 		if err != nil {
 			return err
 		}
@@ -159,11 +177,11 @@ func runHugoServerWithWatch(args []string) error {
 		return err
 	}
 
-	hugoArgs := make([]string, 0, len(args)+1)
-	hugoArgs = append(hugoArgs, "server")
-	hugoArgs = append(hugoArgs, args...)
+	hugoArgs := make([]string, 0, len(args)+5)
+	hugoArgs = append(hugoArgs, "server", "--bind", envyInternalHugoBind, "--port", envyInternalHugoPort)
+	hugoArgs = append(hugoArgs, filterListenFlags(args)...)
 
-	buildSiteDir, err := prepareBuildAssets(manifestFilePath, false)
+	buildSiteDir, err := prepareBuildAssets(manifestFilePath, false, envyWatchPublicURL)
 	if err != nil {
 		return err
 	}
@@ -171,8 +189,8 @@ func runHugoServerWithWatch(args []string) error {
 
 	command, _ := buildHugoExecCommand(hugoArgs)
 	command.Stdin = os.Stdin
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdout = &messageRewriteWriter{target: os.Stdout}
+	command.Stderr = &messageRewriteWriter{target: os.Stderr}
 	command.Dir = buildSiteDir
 	command.Env = append(os.Environ(),
 		"GOFLAGS=-mod=vendor",
@@ -189,7 +207,37 @@ func runHugoServerWithWatch(args []string) error {
 		waitCh <- command.Wait()
 	}()
 
-	fileState, err := composeManifestState(manifestFilePath)
+	hugoTargetURL, err := url.Parse("http://" + envyInternalHugoBind + ":" + envyInternalHugoPort)
+	if err != nil {
+		return fmt.Errorf("parsing internal hugo url: %w", err)
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(hugoTargetURL)
+	mux := http.NewServeMux()
+	var syncBuildMu sync.Mutex
+	syncGeneratedSite := func() error {
+		syncBuildMu.Lock()
+		defer syncBuildMu.Unlock()
+		return syncBuildAssets(manifestFilePath, buildSiteDir, false, envyWatchPublicURL)
+	}
+	mux.HandleFunc("/api/vars", editorAPIHandler(manifestFilePath))
+	mux.HandleFunc("/api/services", serviceAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.HandleFunc("/api/services/", serviceAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.HandleFunc("/api/sets", setAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.HandleFunc("/api/sets/", setAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.HandleFunc("/api/profiles", profileAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.HandleFunc("/api/profiles/", profileAPIHandler(manifestFilePath, syncGeneratedSite))
+	mux.Handle("/", proxy)
+
+	frontendServer := &http.Server{Addr: envyWatchProxyBind, Handler: mux}
+	frontendErrCh := make(chan error, 1)
+	go func() {
+		if err := frontendServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			frontendErrCh <- err
+		}
+	}()
+
+	fileState, err := manifestState(manifestFilePath)
 	if err != nil {
 		return err
 	}
@@ -204,6 +252,9 @@ func runHugoServerWithWatch(args []string) error {
 	for {
 		select {
 		case <-sigCh:
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = frontendServer.Shutdown(ctx)
+			cancel()
 			if command.Process != nil {
 				_ = command.Process.Signal(os.Interrupt)
 				select {
@@ -217,7 +268,15 @@ func runHugoServerWithWatch(args []string) error {
 				}
 			}
 			return nil
+		case frontErr := <-frontendErrCh:
+			if command.Process != nil {
+				_ = command.Process.Signal(os.Interrupt)
+			}
+			return fmt.Errorf("watch frontend server failed: %w", frontErr)
 		case waitErr := <-waitCh:
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = frontendServer.Shutdown(ctx)
+			cancel()
 			if waitErr != nil {
 				var exitErr *exec.ExitError
 				if errors.As(waitErr, &exitErr) {
@@ -227,7 +286,7 @@ func runHugoServerWithWatch(args []string) error {
 			}
 			return nil
 		case <-ticker.C:
-			changed, nextState, stateErr := composeManifestChanged(manifestFilePath, fileState)
+			changed, nextState, stateErr := manifestChanged(manifestFilePath, fileState)
 			if stateErr != nil {
 				return stateErr
 			}
@@ -236,12 +295,49 @@ func runHugoServerWithWatch(args []string) error {
 			}
 
 			fmt.Fprintln(os.Stderr, "compose.yml changed, regenerating documentation content...")
-			if err := syncBuildAssets(manifestFilePath, buildSiteDir, false); err != nil {
+			syncBuildMu.Lock()
+			err := syncBuildAssets(manifestFilePath, buildSiteDir, false, envyWatchPublicURL)
+			syncBuildMu.Unlock()
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "failed to regenerate site assets: %v\n", err)
 			}
 			fileState = nextState
 		}
 	}
+}
+
+type messageRewriteWriter struct {
+	target io.Writer
+}
+
+func (w *messageRewriteWriter) Write(p []byte) (int, error) {
+	rewritten := strings.ReplaceAll(string(p), internalHugoServerMessage, publicEnvyServerMessage)
+	rewritten = strings.ReplaceAll(rewritten, hugoFastRenderMessage, envyFastRenderMessage)
+	if _, err := io.WriteString(w.target, rewritten); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func filterListenFlags(args []string) []string {
+	filtered := make([]string, 0, len(args))
+	skipNext := false
+	for i := 0; i < len(args); i++ {
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		arg := args[i]
+		if arg == "--bind" || arg == "--port" {
+			skipNext = true
+			continue
+		}
+		if strings.HasPrefix(arg, "--bind=") || strings.HasPrefix(arg, "--port=") {
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
 }
 
 func parseWatchFlag(args []string) (bool, []string, error) {
@@ -276,7 +372,7 @@ type manifestFileState struct {
 	size    int64
 }
 
-func composeManifestState(path string) (manifestFileState, error) {
+func manifestState(path string) (manifestFileState, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return manifestFileState{}, fmt.Errorf("checking compose.yaml at %s: %w", path, err)
@@ -284,8 +380,8 @@ func composeManifestState(path string) (manifestFileState, error) {
 	return manifestFileState{modTime: info.ModTime(), size: info.Size()}, nil
 }
 
-func composeManifestChanged(path string, previous manifestFileState) (bool, manifestFileState, error) {
-	current, err := composeManifestState(path)
+func manifestChanged(path string, previous manifestFileState) (bool, manifestFileState, error) {
+	current, err := manifestState(path)
 	if err != nil {
 		return false, manifestFileState{}, err
 	}
@@ -293,6 +389,1607 @@ func composeManifestChanged(path string, previous manifestFileState) (bool, mani
 		return true, current, nil
 	}
 	return false, previous, nil
+}
+
+func parseEditorRequestForm(r *http.Request) error {
+	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		return r.ParseMultipartForm(1 << 20)
+	}
+	return r.ParseForm()
+}
+
+func editorAPIHandler(manifestPath string) http.HandlerFunc {
+	var writeMu sync.Mutex
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := parseEditorRequestForm(r); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		varKey := strings.TrimSpace(r.FormValue("key"))
+		pagePath := strings.TrimSpace(r.FormValue("page"))
+		newValue := r.FormValue("value")
+		if varKey == "" {
+			http.Error(w, "missing key", http.StatusBadRequest)
+			return
+		}
+
+		setSlug, err := extractSetSlugFromPagePath(pagePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		writeMu.Lock()
+		err = updateVarDefaultInManifest(manifestPath, setSlug, varKey, newValue)
+		writeMu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("HX-Trigger", "envyVarSaved")
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// serviceAPIHandler creates, updates, or deletes services in compose.yml.
+// Supported fields via POST: create, name, title, description, link, image, platform.
+// DELETE /api/services/{slug}: deletes a service.
+func serviceAPIHandler(manifestPath string, afterWrite ...func() error) http.HandlerFunc {
+	var writeMu sync.Mutex
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			serviceSlug := strings.TrimSpace(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/services/"), "/"))
+			if serviceSlug == "" || strings.Contains(serviceSlug, "/") {
+				http.Error(w, "missing or invalid service slug", http.StatusBadRequest)
+				return
+			}
+			serviceSlug = sanitizeServicePageName(serviceSlug)
+
+			pagePath := strings.TrimSpace(r.URL.Query().Get("page"))
+			if pagePath == "" {
+				if ref := strings.TrimSpace(r.Referer()); ref != "" {
+					if refURL, err := url.Parse(ref); err == nil {
+						pagePath = strings.TrimSpace(refURL.Path)
+					}
+				}
+			}
+			if extractedSlug, err := extractServiceSlugFromPagePath(pagePath); err != nil {
+				http.Error(w, "service deletion is only allowed from service detail pages", http.StatusBadRequest)
+				return
+			} else if extractedSlug != serviceSlug {
+				http.Error(w, "service slug does not match service detail page", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err := deleteServiceFromManifest(manifestPath, serviceSlug)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			w.Header().Set("HX-Redirect", serviceIndexPagePath(pagePath))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := parseEditorRequestForm(r); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		field := strings.TrimSpace(r.FormValue("field"))
+		pagePath := strings.TrimSpace(r.FormValue("page"))
+		requestKey := strings.TrimSpace(r.FormValue("key"))
+		requestValue := r.FormValue("value")
+
+		if field == "create" || (pagePath == "" && requestKey == "" && strings.TrimSpace(requestValue) != "") {
+			serviceName := strings.TrimSpace(requestValue)
+			if serviceName == "" {
+				http.Error(w, "service name cannot be empty", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err := addServiceToManifest(manifestPath, serviceName)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			w.Header().Set("HX-Redirect", "/services/"+sanitizeServicePageName(serviceName)+"/")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		serviceSlug, err := editorEntitySlugFromRequest(r, "services")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		writeMu.Lock()
+		err = updateServiceFieldInManifest(manifestPath, serviceSlug, field, r.FormValue("value"))
+		writeMu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(afterWrite) > 0 && afterWrite[0] != nil {
+			if err := afterWrite[0](); err != nil {
+				http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if redirectPath, redirectErr := updatedEntityPagePath(pagePath, "services", sanitizeServicePageName(strings.TrimSpace(r.FormValue("value")))); redirectErr == nil && redirectPath != "" && redirectPath != pagePath && (field == "name" || field == "title") {
+			w.Header().Set("HX-Redirect", redirectPath)
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func serviceIndexPagePath(pagePath string) string {
+	trimmed := strings.TrimSpace(pagePath)
+	if trimmed == "" {
+		return "/services/"
+	}
+
+	const section = "/services/"
+	idx := strings.Index(trimmed, section)
+	if idx == -1 {
+		return "/services/"
+	}
+
+	prefix := trimmed[:idx]
+	if prefix == "" {
+		return "/services/"
+	}
+
+	return prefix + section
+}
+
+// setAPIHandler creates, updates, or deletes sets in compose.yml.
+// Supported fields via POST: create, name, title, description, link.
+// DELETE /api/sets/{slug}: deletes a set and all set alias references.
+func setAPIHandler(manifestPath string, afterWrite ...func() error) http.HandlerFunc {
+	var writeMu sync.Mutex
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			setSlug := strings.TrimSpace(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/sets/"), "/"))
+			if setSlug == "" || strings.Contains(setSlug, "/") {
+				http.Error(w, "missing or invalid set slug", http.StatusBadRequest)
+				return
+			}
+			setSlug = sanitizeSetPageName(setSlug)
+
+			pagePath := strings.TrimSpace(r.URL.Query().Get("page"))
+			if pagePath == "" {
+				if ref := strings.TrimSpace(r.Referer()); ref != "" {
+					if refURL, err := url.Parse(ref); err == nil {
+						pagePath = strings.TrimSpace(refURL.Path)
+					}
+				}
+			}
+			if extractedSlug, err := extractSetSlugFromPagePath(pagePath); err != nil {
+				http.Error(w, "set deletion is only allowed from set detail pages", http.StatusBadRequest)
+				return
+			} else if extractedSlug != setSlug {
+				http.Error(w, "set slug does not match set detail page", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err := deleteSetFromManifest(manifestPath, setSlug)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			w.Header().Set("HX-Redirect", setIndexPagePath(pagePath))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := parseEditorRequestForm(r); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		field := strings.TrimSpace(r.FormValue("field"))
+		pagePath := strings.TrimSpace(r.FormValue("page"))
+		requestKey := strings.TrimSpace(r.FormValue("key"))
+		requestValue := r.FormValue("value")
+
+		if field == "create" || (pagePath == "" && requestKey == "" && strings.TrimSpace(requestValue) != "") {
+			setName := strings.TrimSpace(requestValue)
+			if setName == "" {
+				http.Error(w, "set name cannot be empty", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err := addSetToManifest(manifestPath, setName)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			w.Header().Set("HX-Redirect", "/sets/"+sanitizeSetPageName(setName)+"/")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		setSlug, err := editorEntitySlugFromRequest(r, "sets")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		writeMu.Lock()
+		err = updateSetFieldInManifest(manifestPath, setSlug, field, r.FormValue("value"))
+		writeMu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(afterWrite) > 0 && afterWrite[0] != nil {
+			if err := afterWrite[0](); err != nil {
+				http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if redirectPath, redirectErr := updatedEntityPagePath(pagePath, "sets", sanitizeSetPageName(strings.TrimSpace(r.FormValue("value")))); redirectErr == nil && redirectPath != "" && redirectPath != pagePath && (field == "name" || field == "title") {
+			w.Header().Set("HX-Redirect", redirectPath)
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func setIndexPagePath(pagePath string) string {
+	trimmed := strings.TrimSpace(pagePath)
+	if trimmed == "" {
+		return "/sets/"
+	}
+
+	const section = "/sets/"
+	idx := strings.Index(trimmed, section)
+	if idx == -1 {
+		return "/sets/"
+	}
+
+	prefix := trimmed[:idx]
+	if prefix == "" {
+		return "/sets/"
+	}
+
+	return prefix + section
+}
+
+// profileAPIHandler creates, renames, or deletes profile references in compose.yml.
+// field=create: adds a new profile (value=<profileName>).
+// field=name or field=title: renames an existing profile.
+// field=delete: removes a profile from all service profile lists.
+func profileAPIHandler(manifestPath string, afterWrite ...func() error) http.HandlerFunc {
+	var writeMu sync.Mutex
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			profileSlug := strings.TrimSpace(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/profiles/"), "/"))
+			if profileSlug == "" || strings.Contains(profileSlug, "/") {
+				http.Error(w, "missing or invalid profile slug", http.StatusBadRequest)
+				return
+			}
+			profileSlug = sanitizeProfilePageName(profileSlug)
+
+			if profileSlug == "none" {
+				http.Error(w, "profile \"none\" is virtual and cannot be renamed or deleted", http.StatusBadRequest)
+				return
+			}
+
+			pagePath := strings.TrimSpace(r.URL.Query().Get("page"))
+			if pagePath == "" {
+				if ref := strings.TrimSpace(r.Referer()); ref != "" {
+					if refURL, err := url.Parse(ref); err == nil {
+						pagePath = strings.TrimSpace(refURL.Path)
+					}
+				}
+			}
+			if extractedSlug, err := extractProfileSlugFromPagePath(pagePath); err != nil {
+				http.Error(w, "profile deletion is only allowed from profile detail pages", http.StatusBadRequest)
+				return
+			} else if extractedSlug != profileSlug {
+				http.Error(w, "profile slug does not match profile detail page", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err := deleteProfileFromManifest(manifestPath, profileSlug)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			w.Header().Set("HX-Redirect", profileIndexPagePath(pagePath))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := parseEditorRequestForm(r); err != nil {
+			http.Error(w, "invalid form payload", http.StatusBadRequest)
+			return
+		}
+
+		field := strings.TrimSpace(r.FormValue("field"))
+		pagePath := strings.TrimSpace(r.FormValue("page"))
+		requestKey := strings.TrimSpace(r.FormValue("key"))
+		requestValue := r.FormValue("value")
+
+		if field == "create" || (pagePath == "" && requestKey == "" && strings.TrimSpace(requestValue) != "") {
+			profileName := strings.TrimSpace(requestValue)
+			if profileName == "" {
+				http.Error(w, "profile name cannot be empty", http.StatusBadRequest)
+				return
+			}
+			writeMu.Lock()
+			err := addProfileToManifest(manifestPath, profileName)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(afterWrite) > 0 && afterWrite[0] != nil {
+				if err := afterWrite[0](); err != nil {
+					http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
+			w.Header().Set("HX-Redirect", "/profiles/"+sanitizeProfilePageName(profileName)+"/")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		profileSlug, err := editorEntitySlugFromRequest(r, "profiles")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if profileSlug == "none" {
+			http.Error(w, "profile \"none\" is virtual and cannot be renamed or deleted", http.StatusBadRequest)
+			return
+		}
+
+		writeMu.Lock()
+		err = updateProfileFieldInManifest(manifestPath, profileSlug, field, r.FormValue("value"))
+		writeMu.Unlock()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(afterWrite) > 0 && afterWrite[0] != nil {
+			if err := afterWrite[0](); err != nil {
+				http.Error(w, fmt.Sprintf("failed to refresh generated site: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if redirectPath, redirectErr := updatedEntityPagePath(pagePath, "profiles", sanitizeProfilePageName(strings.TrimSpace(r.FormValue("value")))); redirectErr == nil && redirectPath != "" && redirectPath != pagePath {
+			w.Header().Set("HX-Redirect", redirectPath)
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func profileIndexPagePath(pagePath string) string {
+	trimmed := strings.TrimSpace(pagePath)
+	if trimmed == "" {
+		return "/profiles/"
+	}
+
+	const section = "/profiles/"
+	idx := strings.Index(trimmed, section)
+	if idx == -1 {
+		return "/profiles/"
+	}
+
+	prefix := trimmed[:idx]
+	if prefix == "" {
+		return "/profiles/"
+	}
+
+	return prefix + section
+}
+
+func editorEntitySlugFromRequest(r *http.Request, section string) (string, error) {
+	if key := sanitizeEditorEntityKey(strings.TrimSpace(r.FormValue("key"))); key != "" {
+		return key, nil
+	}
+	return extractEntitySlugFromPagePath(strings.TrimSpace(r.FormValue("page")), section)
+}
+
+func sanitizeEditorEntityKey(key string) string {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(trimmed, "/"):
+		return sanitizeSetPageName(trimmed)
+	default:
+		replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-")
+		return replacer.Replace(trimmed)
+	}
+}
+
+func extractSetSlugFromPagePath(pagePath string) (string, error) {
+	return extractEntitySlugFromPagePath(pagePath, "sets")
+}
+
+func extractServiceSlugFromPagePath(pagePath string) (string, error) {
+	return extractEntitySlugFromPagePath(pagePath, "services")
+}
+
+func extractProfileSlugFromPagePath(pagePath string) (string, error) {
+	return extractEntitySlugFromPagePath(pagePath, "profiles")
+}
+
+func extractEntitySlugFromPagePath(pagePath, section string) (string, error) {
+	trimmed := strings.TrimSpace(pagePath)
+	if trimmed == "" {
+		return "", fmt.Errorf("missing page path")
+	}
+
+	needle := "/" + strings.Trim(section, "/") + "/"
+	idx := strings.Index(trimmed, needle)
+	if idx == -1 {
+		return "", fmt.Errorf("page path %q is not a %s page", pagePath, strings.Trim(section, "/"))
+	}
+
+	rest := strings.TrimPrefix(trimmed[idx:], needle)
+	slug := strings.TrimSpace(strings.Split(rest, "/")[0])
+	if slug == "" {
+		return "", fmt.Errorf("could not extract %s slug from page path %q", strings.Trim(section, "/"), pagePath)
+	}
+
+	return slug, nil
+}
+
+func updatedEntityPagePath(pagePath, section, newSlug string) (string, error) {
+	trimmedPagePath := strings.TrimSpace(pagePath)
+	trimmedSlug := strings.TrimSpace(newSlug)
+	if trimmedPagePath == "" || trimmedSlug == "" {
+		return "", nil
+	}
+
+	needle := "/" + strings.Trim(section, "/") + "/"
+	idx := strings.Index(trimmedPagePath, needle)
+	if idx == -1 {
+		return "", fmt.Errorf("page path %q is not a %s page", pagePath, strings.Trim(section, "/"))
+	}
+
+	prefix := trimmedPagePath[:idx+len(needle)]
+	rest := trimmedPagePath[idx+len(needle):]
+	segments := strings.Split(rest, "/")
+	if len(segments) == 0 || strings.TrimSpace(segments[0]) == "" {
+		return "", fmt.Errorf("could not extract %s slug from page path %q", strings.Trim(section, "/"), pagePath)
+	}
+	segments[0] = trimmedSlug
+	updatedPath := prefix + strings.Join(segments, "/")
+	if strings.HasSuffix(trimmedPagePath, "/") && !strings.HasSuffix(updatedPath, "/") {
+		updatedPath += "/"
+	}
+
+	return updatedPath, nil
+}
+
+func updateVarDefaultInManifest(manifestPath, setSlug, varKey, newValue string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyVarUpdateToManifestNode(document, setSlug, varKey, newValue)
+	})
+}
+
+func updateServiceFieldInManifest(manifestPath, serviceSlug, field, newValue string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyServiceFieldUpdateToManifestNode(document, serviceSlug, field, newValue)
+	})
+}
+
+func addServiceToManifest(manifestPath, serviceName string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyAddServiceToManifestNode(document, serviceName)
+	})
+}
+
+func deleteServiceFromManifest(manifestPath, serviceSlug string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyServiceDeleteToManifestNode(document, serviceSlug)
+	})
+}
+
+func updateSetFieldInManifest(manifestPath, setSlug, field, newValue string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applySetFieldUpdateToManifestNode(document, setSlug, field, newValue)
+	})
+}
+
+func deleteSetFromManifest(manifestPath, setSlug string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applySetDeleteToManifestNode(document, setSlug)
+	})
+}
+
+func addSetToManifest(manifestPath, setName string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyAddSetToManifestNode(document, setName)
+	})
+}
+
+func updateProfileFieldInManifest(manifestPath, profileSlug, field, newValue string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyProfileFieldUpdateToManifestNode(document, profileSlug, field, newValue)
+	})
+}
+
+func deleteProfileFromManifest(manifestPath, profileSlug string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyProfileDeleteToManifestNode(document, profileSlug)
+	})
+}
+
+func updateManifest(manifestPath string, apply func(document *yaml.Node) error) error {
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("reading compose manifest: %w", err)
+	}
+
+	var document yaml.Node
+	if err := yaml.Unmarshal(content, &document); err != nil {
+		return fmt.Errorf("parsing compose manifest: %w", err)
+	}
+
+	if err := apply(&document); err != nil {
+		return err
+	}
+
+	if len(document.Content) == 0 {
+		return fmt.Errorf("compose manifest is empty")
+	}
+
+	updated, err := yaml.Marshal(document.Content[0])
+	if err != nil {
+		return fmt.Errorf("serializing compose manifest: %w", err)
+	}
+
+	if err := validateUpdatedManifest(manifestPath, updated); err != nil {
+		return err
+	}
+
+	if err := writeFileAtomically(manifestPath, updated); err != nil {
+		return fmt.Errorf("writing compose manifest: %w", err)
+	}
+
+	return nil
+}
+
+func applyServiceFieldUpdateToManifestNode(document *yaml.Node, serviceSlug, field, newValue string) error {
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		keyNode := servicesNode.Content[i]
+		valueNode := servicesNode.Content[i+1]
+		if sanitizeServicePageName(keyNode.Value) != serviceSlug {
+			continue
+		}
+
+		switch strings.TrimSpace(field) {
+		case "name", "title":
+			trimmedValue := strings.TrimSpace(newValue)
+			if trimmedValue == "" {
+				return fmt.Errorf("service name cannot be empty")
+			}
+			if err := ensureUniqueServiceSlug(servicesNode, i, trimmedValue); err != nil {
+				return err
+			}
+			keyNode.Value = trimmedValue
+		case "description":
+			description, link := extractEntryMetadataFromComments(servicesNode, i)
+			setEntryLeadingComment(servicesNode, i, newValue, link)
+			_ = description
+		case "link":
+			description, _ := extractEntryMetadataFromComments(servicesNode, i)
+			setEntryLeadingComment(servicesNode, i, description, newValue)
+		case "image":
+			upsertMappingScalarField(valueNode, "image", newValue)
+		case "platform":
+			upsertMappingScalarField(valueNode, "platform", newValue)
+		default:
+			return fmt.Errorf("unsupported service field %q", field)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("service %q not found in compose manifest", serviceSlug)
+}
+
+func applyAddServiceToManifestNode(document *yaml.Node, serviceName string) error {
+	trimmed := strings.TrimSpace(serviceName)
+	if trimmed == "" {
+		return fmt.Errorf("service name cannot be empty")
+	}
+
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	newSlug := sanitizeServicePageName(trimmed)
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		if sanitizeServicePageName(servicesNode.Content[i].Value) == newSlug {
+			return fmt.Errorf("service %q already exists", trimmed)
+		}
+	}
+
+	serviceNode := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+		{Kind: yaml.ScalarNode, Value: "image"},
+		newScalarNode("busybox:latest"),
+	}}
+	servicesNode.Content = append(servicesNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: trimmed},
+		serviceNode,
+	)
+
+	return nil
+}
+
+func applyServiceDeleteToManifestNode(document *yaml.Node, serviceSlug string) error {
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		if sanitizeServicePageName(servicesNode.Content[i].Value) != serviceSlug {
+			continue
+		}
+		servicesNode.Content = append(servicesNode.Content[:i], servicesNode.Content[i+2:]...)
+		return nil
+	}
+
+	return fmt.Errorf("service %q not found in compose manifest", serviceSlug)
+}
+
+func ensureUniqueServiceSlug(servicesNode *yaml.Node, currentKeyIndex int, newValue string) error {
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+	newSlug := sanitizeServicePageName(newValue)
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		if i == currentKeyIndex {
+			continue
+		}
+		if sanitizeServicePageName(servicesNode.Content[i].Value) == newSlug {
+			return fmt.Errorf("service name %q conflicts with existing service %q", newValue, servicesNode.Content[i].Value)
+		}
+	}
+	return nil
+}
+
+func applySetFieldUpdateToManifestNode(document *yaml.Node, setSlug, field, newValue string) error {
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(setKey) != setSlug {
+				continue
+			}
+			description, link := extractEntryMetadataFromComments(root, i)
+			switch strings.TrimSpace(field) {
+			case "name", "title":
+				trimmedValue := strings.TrimSpace(newValue)
+				if trimmedValue == "" {
+					return fmt.Errorf("set name cannot be empty")
+				}
+				if err := ensureUniqueSetSlug(root, i, trimmedValue); err != nil {
+					return err
+				}
+				oldAnchor := valueNode.Anchor
+				keyNode.Value = "x-set-" + trimmedValue
+				if oldAnchor != "" {
+					valueNode.Anchor = trimmedValue
+					updateAliasReferences(document, valueNode, oldAnchor, trimmedValue)
+				}
+			case "description":
+				setEntryLeadingComment(root, i, newValue, link)
+			case "link":
+				setEntryLeadingComment(root, i, description, newValue)
+			default:
+				return applySetFieldUpdate(valueNode, field, newValue)
+			}
+			return nil
+		}
+
+		if keyNode.Value == "sets" && valueNode.Kind == yaml.MappingNode {
+			for j := 0; j < len(valueNode.Content); j += 2 {
+				setKeyNode := valueNode.Content[j]
+				setValueNode := valueNode.Content[j+1]
+				if sanitizeSetPageName(setKeyNode.Value) != setSlug {
+					continue
+				}
+				if strings.TrimSpace(field) == "name" || strings.TrimSpace(field) == "title" {
+					trimmedValue := strings.TrimSpace(newValue)
+					if trimmedValue == "" {
+						return fmt.Errorf("set name cannot be empty")
+					}
+					setKeyNode.Value = trimmedValue
+					return nil
+				}
+				return applySetFieldUpdate(setValueNode, field, newValue)
+			}
+		}
+	}
+
+	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func ensureUniqueSetSlug(root *yaml.Node, currentKeyIndex int, newValue string) error {
+	newSlug := sanitizeSetPageName(newValue)
+	for i := 0; i < len(root.Content); i += 2 {
+		if i == currentKeyIndex {
+			continue
+		}
+		keyNode := root.Content[i]
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			existingKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(existingKey) == newSlug {
+				return fmt.Errorf("set name %q conflicts with existing set %q", newValue, existingKey)
+			}
+		}
+	}
+	return nil
+}
+
+// updateAliasReferences walks the YAML node tree and renames all alias nodes
+// whose Alias pointer matches anchoredNode, updating their Value to newAnchor.
+func updateAliasReferences(n *yaml.Node, anchoredNode *yaml.Node, oldAnchor, newAnchor string) {
+	if n == nil {
+		return
+	}
+	for _, child := range n.Content {
+		if child.Kind == yaml.AliasNode && child.Alias == anchoredNode {
+			child.Value = newAnchor
+		}
+		updateAliasReferences(child, anchoredNode, oldAnchor, newAnchor)
+	}
+}
+
+func applySetDeleteToManifestNode(document *yaml.Node, setSlug string) error {
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	found := false
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		if !strings.HasPrefix(keyNode.Value, "x-set-") {
+			continue
+		}
+
+		setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+		if sanitizeSetPageName(setKey) != setSlug {
+			continue
+		}
+
+		setNode := root.Content[i+1]
+		anchorName := strings.TrimSpace(setNode.Anchor)
+
+		root.Content = append(root.Content[:i], root.Content[i+2:]...)
+		if anchorName != "" {
+			removeSetAliasReferences(document, anchorName)
+		}
+		found = true
+		break
+	}
+
+	if found {
+		return nil
+	}
+
+	setsNode := mappingValueNode(root, "sets")
+	if setsNode != nil && setsNode.Kind == yaml.MappingNode {
+		for i := 0; i < len(setsNode.Content); i += 2 {
+			if sanitizeSetPageName(setsNode.Content[i].Value) != setSlug {
+				continue
+			}
+			setsNode.Content = append(setsNode.Content[:i], setsNode.Content[i+2:]...)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func removeSetAliasReferences(node *yaml.Node, anchorName string) {
+	if node == nil {
+		return
+	}
+
+	switch node.Kind {
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); {
+			key := node.Content[i]
+			value := node.Content[i+1]
+
+			if aliasMatchesAnchor(value, anchorName) {
+				node.Content = append(node.Content[:i], node.Content[i+2:]...)
+				continue
+			}
+
+			removeSetAliasReferences(value, anchorName)
+			if key.Value == "<<" && value.Kind == yaml.SequenceNode && len(value.Content) == 0 {
+				node.Content = append(node.Content[:i], node.Content[i+2:]...)
+				continue
+			}
+
+			i += 2
+		}
+	case yaml.SequenceNode:
+		filtered := node.Content[:0]
+		for _, child := range node.Content {
+			if aliasMatchesAnchor(child, anchorName) {
+				continue
+			}
+			removeSetAliasReferences(child, anchorName)
+			filtered = append(filtered, child)
+		}
+		node.Content = filtered
+	default:
+		for _, child := range node.Content {
+			removeSetAliasReferences(child, anchorName)
+		}
+	}
+}
+
+func aliasMatchesAnchor(node *yaml.Node, anchorName string) bool {
+	if node == nil || node.Kind != yaml.AliasNode {
+		return false
+	}
+	if strings.TrimSpace(node.Value) == anchorName {
+		return true
+	}
+	return node.Alias != nil && strings.TrimSpace(node.Alias.Anchor) == anchorName
+}
+
+func applyAddSetToManifestNode(document *yaml.Node, setName string) error {
+	trimmed := strings.TrimSpace(setName)
+	if trimmed == "" {
+		return fmt.Errorf("set name cannot be empty")
+	}
+
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	newSlug := sanitizeSetPageName(trimmed)
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			existingKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(existingKey) == newSlug {
+				return fmt.Errorf("set %q already exists", trimmed)
+			}
+		}
+		if keyNode.Value == "sets" {
+			setsNode := root.Content[i+1]
+			if setsNode.Kind == yaml.MappingNode {
+				for j := 0; j < len(setsNode.Content); j += 2 {
+					if sanitizeSetPageName(setsNode.Content[j].Value) == newSlug {
+						return fmt.Errorf("set %q already exists", trimmed)
+					}
+				}
+			}
+		}
+	}
+
+	insertAt := len(root.Content)
+	for i := 0; i < len(root.Content); i += 2 {
+		if root.Content[i].Value == "services" {
+			insertAt = i
+			break
+		}
+	}
+
+	newKey := &yaml.Node{Kind: yaml.ScalarNode, Value: "x-set-" + trimmed}
+	newValue := &yaml.Node{Kind: yaml.MappingNode, Anchor: trimmed, Content: []*yaml.Node{}}
+
+	root.Content = append(root.Content, nil, nil)
+	copy(root.Content[insertAt+2:], root.Content[insertAt:])
+	root.Content[insertAt] = newKey
+	root.Content[insertAt+1] = newValue
+
+	return nil
+}
+
+func applySetFieldUpdate(setNode *yaml.Node, field, newValue string) error {
+	if setNode == nil || setNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("set node is not a mapping")
+	}
+
+	switch strings.TrimSpace(field) {
+	case "description":
+		upsertMappingScalarField(setNode, "description", newValue)
+	case "link":
+		upsertMappingScalarField(setNode, "link", newValue)
+	default:
+		return fmt.Errorf("unsupported set field %q", field)
+	}
+
+	return nil
+}
+
+func setEntryLeadingComment(root *yaml.Node, keyIndex int, description, link string) {
+	if root == nil || keyIndex < 0 || keyIndex+1 >= len(root.Content) {
+		return
+	}
+	keyNode := root.Content[keyIndex]
+	valueNode := root.Content[keyIndex+1]
+	comment := buildEntryLeadingComment(description, link)
+	keyNode.HeadComment = comment
+	keyNode.LineComment = ""
+	valueNode.HeadComment = ""
+	valueNode.LineComment = ""
+	if keyIndex >= 2 {
+		root.Content[keyIndex-1].FootComment = ""
+	}
+}
+
+func buildEntryLeadingComment(description, link string) string {
+	parts := make([]string, 0, 2)
+	if trimmedDescription := strings.TrimSpace(description); trimmedDescription != "" {
+		parts = append(parts, trimmedDescription)
+	}
+	if trimmedLink := strings.TrimSpace(link); trimmedLink != "" {
+		parts = append(parts, "Link: "+trimmedLink)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func extractEntryMetadataFromComments(root *yaml.Node, keyIndex int) (string, string) {
+	if root == nil || keyIndex < 0 || keyIndex+1 >= len(root.Content) {
+		return "", ""
+	}
+
+	keyNode := root.Content[keyIndex]
+	valueNode := root.Content[keyIndex+1]
+	comments := []string{
+		keyNode.HeadComment,
+		keyNode.LineComment,
+		valueNode.HeadComment,
+		valueNode.LineComment,
+	}
+	if keyIndex >= 2 {
+		comments = append([]string{root.Content[keyIndex-1].FootComment}, comments...)
+	}
+
+	var descriptionParts []string
+	link := ""
+	for _, raw := range comments {
+		for _, line := range strings.Split(raw, "\n") {
+			trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			if matches := editorPrefixedLinkPattern.FindStringSubmatch(trimmed); len(matches) == 2 {
+				if link == "" {
+					link = strings.TrimSpace(matches[1])
+				}
+				continue
+			}
+			if editorPlainLinkPattern.MatchString(trimmed) {
+				if link == "" {
+					link = trimmed
+				}
+				continue
+			}
+			descriptionParts = append(descriptionParts, trimmed)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(descriptionParts, " ")), link
+}
+
+func applyProfileFieldUpdateToManifestNode(document *yaml.Node, profileSlug, field, newValue string) error {
+	if strings.TrimSpace(field) != "name" && strings.TrimSpace(field) != "title" {
+		return fmt.Errorf("unsupported profile field %q", field)
+	}
+	trimmedValue := strings.TrimSpace(newValue)
+	if trimmedValue == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	found := false
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		serviceNode := servicesNode.Content[i+1]
+		profilesNode := mappingValueNode(serviceNode, "profiles")
+		if profilesNode == nil {
+			continue
+		}
+		updated, err := replaceProfileReferences(profilesNode, profileSlug, trimmedValue)
+		if err != nil {
+			return err
+		}
+		if updated {
+			found = true
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("profile %q not found in compose manifest", profileSlug)
+	}
+
+	return nil
+}
+
+func addProfileToManifest(manifestPath, profileName string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyAddProfileToManifestNode(document, profileName)
+	})
+}
+
+// applyAddProfileToManifestNode adds a new profile name to compose services.
+// It appends the profile to the first service that already has profiles; if no
+// such service exists, it adds the profile to the first service in the file.
+func applyAddProfileToManifestNode(document *yaml.Node, profileName string) error {
+	trimmed := strings.TrimSpace(profileName)
+	if trimmed == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+	if sanitizeProfilePageName(trimmed) == "none" {
+		return fmt.Errorf("profile %q is reserved", trimmed)
+	}
+
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode || len(servicesNode.Content) < 2 {
+		return fmt.Errorf("compose manifest has no services")
+	}
+
+	// Reject if profile already exists in any service.
+	newSlug := sanitizeProfilePageName(trimmed)
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		profilesNode := mappingValueNode(servicesNode.Content[i+1], "profiles")
+		if profilesNode == nil {
+			continue
+		}
+		switch profilesNode.Kind {
+		case yaml.SequenceNode:
+			for _, item := range profilesNode.Content {
+				if item.Kind == yaml.ScalarNode && sanitizeProfilePageName(strings.TrimSpace(item.Value)) == newSlug {
+					return fmt.Errorf("profile %q already exists", trimmed)
+				}
+			}
+		case yaml.ScalarNode:
+			if sanitizeProfilePageName(strings.TrimSpace(profilesNode.Value)) == newSlug {
+				return fmt.Errorf("profile %q already exists", trimmed)
+			}
+		}
+	}
+
+	// Find the first service that already has a profiles list, falling back to
+	// the first service if none do.
+	targetIdx := -1
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		if mappingValueNode(servicesNode.Content[i+1], "profiles") != nil {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx == -1 {
+		targetIdx = 0
+	}
+
+	serviceNode := servicesNode.Content[targetIdx+1]
+	profilesNode := mappingValueNode(serviceNode, "profiles")
+	if profilesNode == nil {
+		serviceNode.Content = append(serviceNode.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "profiles"},
+			&yaml.Node{
+				Kind:    yaml.SequenceNode,
+				Content: []*yaml.Node{newScalarNode(trimmed)},
+			},
+		)
+	} else {
+		switch profilesNode.Kind {
+		case yaml.SequenceNode:
+			profilesNode.Content = append(profilesNode.Content, newScalarNode(trimmed))
+		case yaml.ScalarNode:
+			existing := profilesNode.Value
+			profilesNode.Kind = yaml.SequenceNode
+			profilesNode.Value = ""
+			profilesNode.Tag = ""
+			profilesNode.Content = []*yaml.Node{newScalarNode(existing), newScalarNode(trimmed)}
+		}
+	}
+
+	return nil
+}
+
+func manifestRootNode(document *yaml.Node) (*yaml.Node, error) {
+	if document == nil || len(document.Content) == 0 {
+		return nil, fmt.Errorf("compose manifest is empty")
+	}
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("compose manifest root must be a mapping")
+	}
+	return root, nil
+}
+
+func mappingValueNode(mapping *yaml.Node, key string) *yaml.Node {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func upsertMappingScalarField(mapping *yaml.Node, key, value string) {
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return
+	}
+	trimmed := strings.TrimSpace(value)
+	for i := 0; i < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value != key {
+			continue
+		}
+		if trimmed == "" {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+			return
+		}
+		setScalarNodeValue(mapping.Content[i+1], value)
+		return
+	}
+	if trimmed == "" {
+		return
+	}
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key},
+		newScalarNode(value),
+	)
+}
+
+func newScalarNode(value string) *yaml.Node {
+	node := &yaml.Node{}
+	setScalarNodeValue(node, value)
+	return node
+}
+
+func setScalarNodeValue(node *yaml.Node, value string) {
+	if node == nil {
+		return
+	}
+	node.Kind = yaml.ScalarNode
+	node.Tag = "!!str"
+	node.Value = value
+	if strings.Contains(value, "\n") {
+		node.Style = yaml.LiteralStyle
+		return
+	}
+	node.Style = 0
+}
+
+func replaceProfileReferences(node *yaml.Node, profileSlug, newValue string) (bool, error) {
+	updated := false
+	switch node.Kind {
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			if item.Kind != yaml.ScalarNode {
+				continue
+			}
+			if sanitizeProfilePageName(item.Value) != profileSlug {
+				continue
+			}
+			setScalarNodeValue(item, newValue)
+			updated = true
+		}
+	case yaml.ScalarNode:
+		if sanitizeProfilePageName(node.Value) == profileSlug {
+			setScalarNodeValue(node, newValue)
+			updated = true
+		}
+	default:
+		return false, fmt.Errorf("profiles node must be scalar or sequence")
+	}
+	return updated, nil
+}
+
+func applyProfileDeleteToManifestNode(document *yaml.Node, profileSlug string) error {
+	root, err := manifestRootNode(document)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	found := false
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		serviceNode := servicesNode.Content[i+1]
+		if serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+			continue
+		}
+
+		profilesIndex := -1
+		for j := 0; j < len(serviceNode.Content); j += 2 {
+			if serviceNode.Content[j].Value == "profiles" {
+				profilesIndex = j
+				break
+			}
+		}
+		if profilesIndex == -1 {
+			continue
+		}
+
+		profilesNode := serviceNode.Content[profilesIndex+1]
+		switch profilesNode.Kind {
+		case yaml.SequenceNode:
+			filtered := profilesNode.Content[:0]
+			removedFromService := false
+			for _, item := range profilesNode.Content {
+				if item.Kind == yaml.ScalarNode && sanitizeProfilePageName(strings.TrimSpace(item.Value)) == profileSlug {
+					removedFromService = true
+					continue
+				}
+				filtered = append(filtered, item)
+			}
+			if !removedFromService {
+				continue
+			}
+			found = true
+			profilesNode.Content = filtered
+			if len(profilesNode.Content) == 0 {
+				serviceNode.Content = append(serviceNode.Content[:profilesIndex], serviceNode.Content[profilesIndex+2:]...)
+			}
+		case yaml.ScalarNode:
+			if sanitizeProfilePageName(strings.TrimSpace(profilesNode.Value)) != profileSlug {
+				continue
+			}
+			found = true
+			serviceNode.Content = append(serviceNode.Content[:profilesIndex], serviceNode.Content[profilesIndex+2:]...)
+		default:
+			return fmt.Errorf("profiles node must be scalar or sequence")
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("profile %q not found in compose manifest", profileSlug)
+	}
+
+	return nil
+}
+
+func validateUpdatedManifest(manifestPath string, content []byte) error {
+	tmpFile, err := os.CreateTemp(filepath.Dir(manifestPath), "compose-update-*.yml")
+	if err != nil {
+		return fmt.Errorf("creating validation file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.Write(content); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing validation file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing validation file: %w", err)
+	}
+
+	if err := validateComposeFile(tmpPath); err != nil {
+		return fmt.Errorf("updated compose.yml is invalid: %w", err)
+	}
+
+	return nil
+}
+
+func writeFileAtomically(path string, content []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), "compose-write-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.Write(content); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Chmod(info.Mode()); err != nil {
+		tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpPath, path)
+}
+
+func applyVarUpdateToManifestNode(document *yaml.Node, setSlug, varKey, newValue string) error {
+	if document == nil || len(document.Content) == 0 {
+		return fmt.Errorf("compose manifest is empty")
+	}
+
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest root must be a mapping")
+	}
+
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(setKey) != setSlug {
+				continue
+			}
+			updated, err := updateVarInSetNode(valueNode, varKey, newValue)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return fmt.Errorf("variable %q not found in set %q", varKey, setKey)
+			}
+			return nil
+		}
+
+		if keyNode.Value == "sets" && valueNode.Kind == yaml.MappingNode {
+			for j := 0; j < len(valueNode.Content); j += 2 {
+				setKeyNode := valueNode.Content[j]
+				setValueNode := valueNode.Content[j+1]
+				if sanitizeSetPageName(setKeyNode.Value) != setSlug {
+					continue
+				}
+				updated, err := updateVarInSetNode(setValueNode, varKey, newValue)
+				if err != nil {
+					return err
+				}
+				if !updated {
+					return fmt.Errorf("variable %q not found in set %q", varKey, setKeyNode.Value)
+				}
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func updateVarInSetNode(setNode *yaml.Node, varKey, newValue string) (bool, error) {
+	if setNode == nil || setNode.Kind != yaml.MappingNode {
+		return false, fmt.Errorf("set node is not a mapping")
+	}
+
+	for i := 0; i < len(setNode.Content); i += 2 {
+		keyNode := setNode.Content[i]
+		valueNode := setNode.Content[i+1]
+
+		if keyNode.Value == "vars" {
+			updated, err := updateVarInVarsNode(valueNode, varKey, newValue)
+			return updated, err
+		}
+
+		if keyNode.Value == "description" || keyNode.Value == "link" {
+			continue
+		}
+
+		if keyNode.Value == varKey {
+			updateVarValueNode(varKey, valueNode, newValue)
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func updateVarInVarsNode(varsNode *yaml.Node, varKey, newValue string) (bool, error) {
+	if varsNode == nil {
+		return false, nil
+	}
+
+	switch varsNode.Kind {
+	case yaml.MappingNode:
+		for i := 0; i < len(varsNode.Content); i += 2 {
+			if varsNode.Content[i].Value != varKey {
+				continue
+			}
+			updateVarValueNode(varKey, varsNode.Content[i+1], newValue)
+			return true, nil
+		}
+	case yaml.SequenceNode:
+		for _, item := range varsNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			for i := 0; i < len(item.Content); i += 2 {
+				if item.Content[i].Value != "key" || item.Content[i+1].Value != varKey {
+					continue
+				}
+				for j := 0; j < len(item.Content); j += 2 {
+					if item.Content[j].Value == "default" {
+						updateVarValueNode(varKey, item.Content[j+1], newValue)
+						return true, nil
+					}
+				}
+				item.Content = append(item.Content,
+					&yaml.Node{Kind: yaml.ScalarNode, Value: "default"},
+					&yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: newValue},
+				)
+				return true, nil
+			}
+		}
+	default:
+		return false, fmt.Errorf("vars node must be mapping or sequence")
+	}
+
+	return false, nil
+}
+
+func updateVarValueNode(varKey string, valueNode *yaml.Node, newValue string) {
+	if valueNode == nil {
+		return
+	}
+
+	if valueNode.Kind == yaml.MappingNode {
+		for i := 0; i < len(valueNode.Content); i += 2 {
+			if valueNode.Content[i].Value != "default" {
+				continue
+			}
+			updateVarValueNode(varKey, valueNode.Content[i+1], newValue)
+			return
+		}
+		valueNode.Content = append(valueNode.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "default"},
+			&yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: newValue},
+		)
+		return
+	}
+
+	if valueNode.Kind != yaml.ScalarNode {
+		return
+	}
+
+	updated := updatedScalarForVar(varKey, valueNode.Value, newValue)
+	valueNode.Value = updated
+	if valueNode.Style == 0 {
+		valueNode.Style = yaml.DoubleQuotedStyle
+	}
+}
+
+func updatedScalarForVar(varKey, currentValue, newValue string) string {
+	trimmed := strings.TrimSpace(currentValue)
+	matches := composeInterpolationPatternLocal.FindStringSubmatch(trimmed)
+	if len(matches) > 0 && matches[1] == varKey {
+		switch matches[2] {
+		case ":-", "-":
+			return fmt.Sprintf("${%s%s%s}", varKey, matches[2], newValue)
+		case "", ":?", "?":
+			return fmt.Sprintf("${%s:-%s}", varKey, newValue)
+		}
+	}
+	return newValue
 }
 
 func buildHugoExecCommand(args []string) (*exec.Cmd, string) {
@@ -352,7 +2049,7 @@ func resolveBuildManifestPath() (string, error) {
 	return path, nil
 }
 
-func prepareBuildAssets(path string, refreshPersistentContent bool) (string, error) {
+func prepareBuildAssets(path string, refreshPersistentContent bool, editorAPIURL string) (string, error) {
 	siteDir, err := os.MkdirTemp("", "envy-hugo-site-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temporary Hugo site directory: %w", err)
@@ -370,7 +2067,7 @@ func prepareBuildAssets(path string, refreshPersistentContent bool) (string, err
 		return "", fmt.Errorf("writing Hugo site go.mod: %w", err)
 	}
 
-	if err := syncBuildAssets(path, siteDir, refreshPersistentContent); err != nil {
+	if err := syncBuildAssets(path, siteDir, refreshPersistentContent, editorAPIURL); err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
 	}
@@ -378,7 +2075,7 @@ func prepareBuildAssets(path string, refreshPersistentContent bool) (string, err
 	return siteDir, nil
 }
 
-func syncBuildAssets(path, siteDir string, refreshPersistentContent bool) error {
+func syncBuildAssets(path, siteDir string, refreshPersistentContent bool, editorAPIURL string) error {
 	m, err := compose.Load(path)
 	if err != nil {
 		return err
@@ -407,7 +2104,7 @@ func syncBuildAssets(path, siteDir string, refreshPersistentContent bool) error 
 
 	repoURL := detectRepositoryURL(manifestDir)
 
-	if err := writeTempHugoConfigFromManifest(m, siteDir, repoURL); err != nil {
+	if err := writeTempHugoConfigFromManifest(m, siteDir, repoURL, editorAPIURL); err != nil {
 		return err
 	}
 
@@ -441,7 +2138,7 @@ func extractDocsFS(dst string) error {
 	})
 }
 
-func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL string) error {
+func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL string, editorAPIURL string) error {
 	lookup := buildVarLookup(m)
 	defaultLanguage := strings.TrimSpace(hugoConfigValue(m.Meta.HugoDefaultLanguage, lookup, "HUGO_DEFAULT_CONTENT_LANGUAGE"))
 	if defaultLanguage == "" {
@@ -507,6 +2204,12 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 				"path": "images/logo.svg",
 			},
 		},
+	}
+	if strings.TrimSpace(editorAPIURL) != "" {
+		params["envyEditor"] = map[string]interface{}{
+			"enabled": true,
+			"apiURL":  strings.TrimSpace(editorAPIURL),
+		}
 	}
 	if description := strings.TrimSpace(m.Meta.HugoParamsDescription); description != "" {
 		params["description"] = description
@@ -1156,6 +2859,7 @@ func generateSetsIndexMarkdown(m *compose.Project, language string) string {
 		services := servicesForSet(m, set.Key)
 		body.WriteString(renderSetOverviewCard(set, services, language))
 	}
+	body.WriteString(renderAddSetForm())
 	body.WriteString(renderCardsClose())
 	return body.String()
 }
@@ -1181,6 +2885,7 @@ func generateServicesIndexMarkdown(m *compose.Project, language string) string {
 	for _, service := range m.Services {
 		body.WriteString(renderServiceOverviewCard(service, language))
 	}
+	body.WriteString(renderAddServiceForm())
 	body.WriteString(renderCardsClose())
 	return body.String()
 }
@@ -1207,6 +2912,7 @@ func generateProfilesIndexMarkdown(m *compose.Project, language string) string {
 		}
 		body.WriteString(renderProfileCard(profile, "/profiles/"+sanitizeProfilePageName(profile)+"/"))
 	}
+	body.WriteString(renderAddProfileForm())
 	body.WriteString(renderCardsClose())
 	return body.String()
 }
@@ -1351,7 +3057,7 @@ func renderServiceCard(service compose.Service, language string, titleLink strin
 	}
 
 	if len(service.Command) > 0 {
-		rawCommand := composeCommandLiteral(service.Command)
+		rawCommand := commandLiteral(service.Command)
 		sb.WriteString(fmt.Sprintf(" command=\"%s\"", escapeShortcodeValue(rawCommand)))
 	}
 
@@ -1549,9 +3255,9 @@ func imageLink(image string) string {
 	return ""
 }
 
-// composeCommandLiteral formats a Docker Compose list-form command value.
+// commandLiteral formats a Docker Compose list-form command value.
 // Example: [ "valkey-server", "--loglevel", "warning" ]
-func composeCommandLiteral(args []string) string {
+func commandLiteral(args []string) string {
 	if len(args) == 0 {
 		return ""
 	}
@@ -1699,6 +3405,18 @@ func renderProfileCard(title, link string) string {
 		escapeShortcodeValue(title),
 	))
 	return sb.String()
+}
+
+func renderAddProfileForm() string {
+	return "{{< add-profile >}}\n"
+}
+
+func renderAddSetForm() string {
+	return "{{< add-set >}}\n"
+}
+
+func renderAddServiceForm() string {
+	return "{{< add-service >}}\n"
 }
 
 func renderCardWithTag(title, link, icon, description, htmlContent, titlePadding, tag, tagColor, tagBorder, class string) string {

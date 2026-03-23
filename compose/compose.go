@@ -82,16 +82,18 @@ type Set struct {
 	Vars        []Var  `yaml:"vars,omitempty"`
 }
 
-// Var defines a single environment variable's spec.
+// Var defines a single environment variable and extends compose-go's
+// MappingWithEquals with envy-specific settings.
 type Var struct {
-	Key         string `yaml:"key"`
-	Description string `yaml:"description,omitempty"`
-	Link        string `yaml:"-"`
-	Default     string `yaml:"default,omitempty"`
-	Required    string `yaml:"required,omitempty"`
-	Secret      string `yaml:"secret,omitempty"`
-	Readonly    string `yaml:"readonly,omitempty"`
-	Example     string `yaml:"example,omitempty"`
+	types.MappingWithEquals `yaml:",inline"`
+	Key                     string `yaml:"key"`
+	Description             string `yaml:"description,omitempty"`
+	Link                    string `yaml:"-"`
+	Default                 string `yaml:"default,omitempty"`
+	Required                string `yaml:"required,omitempty"`
+	Secret                  string `yaml:"secret,omitempty"`
+	Readonly                string `yaml:"readonly,omitempty"`
+	Example                 string `yaml:"example,omitempty"`
 }
 
 // SetVars holds vars for a single set.

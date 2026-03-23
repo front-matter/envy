@@ -20,6 +20,8 @@
 {{- $tagsServices := .tagsServices | default "" -}}
 {{- $tagsProfiles := .tagsProfiles | default "" -}}
 {{- $tagsSets := .tagsSets | default "" -}}
+{{- $pageRelPermalink := .pageRelPermalink | default "" -}}
+{{- $editorEnabled := site.Params.envyEditor.enabled | default false -}}
 {{- $image := .image -}}
 {{- $alt := .alt | default $title -}}
 {{- $width := .width | default 0 -}}
@@ -56,6 +58,24 @@
 {{- if hasPrefix $varValue "?" -}}
   {{- $varRequired = true -}}
 {{- end -}}
+{{- $hasProfileSlugInPagePath := and (strings.Contains $pageRelPermalink "/profiles/") (not (strings.HasSuffix $pageRelPermalink "/profiles/")) (not (strings.HasSuffix $pageRelPermalink "/profiles")) -}}
+{{- $hasServiceSlugInPagePath := and (strings.Contains $pageRelPermalink "/services/") (not (strings.HasSuffix $pageRelPermalink "/services/")) (not (strings.HasSuffix $pageRelPermalink "/services")) -}}
+{{- $hasSetSlugInPagePath := and (strings.Contains $pageRelPermalink "/sets/") (not (strings.HasSuffix $pageRelPermalink "/sets/")) (not (strings.HasSuffix $pageRelPermalink "/sets")) -}}
+{{- $isProfileDetailCard := and (eq $cardType "profile") $hasProfileSlugInPagePath (eq $titleLink "") -}}
+{{- $isServiceDetailCard := and (eq $cardType "service") $hasServiceSlugInPagePath (eq $titleLink "") -}}
+{{- $isSetDetailCard := and (eq $cardType "set") $hasSetSlugInPagePath (eq $titleLink "") -}}
+{{- $isSetVarCard := and (eq $cardType "var") $hasSetSlugInPagePath -}}
+{{- $isNoneProfileCard := and $isProfileDetailCard (or (strings.Contains $pageRelPermalink "/profiles/none/") (strings.HasSuffix $pageRelPermalink "/profiles/none")) -}}
+{{- $canEditProfileCard := and $editorEnabled $isProfileDetailCard (not $isNoneProfileCard) -}}
+{{- $canEditServiceCard := and $editorEnabled $isServiceDetailCard -}}
+{{- $canEditSetCard := and $editorEnabled $isSetDetailCard -}}
+{{- $fieldSlug := printf "%s-%s" $pageRelPermalink $title | lower | urlize -}}
+{{- $editorScope := $cardType | default "card" -}}
+{{- $fieldID := printf "envy-editor-%s-%s" $editorScope $fieldSlug -}}
+{{- $titleEditorDisplayClass := printf "hx:flex-1 %s %s hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 %s" $titleSize $titleClass "hx:cursor-text hx:outline-none" -}}
+{{- $titleEditorInputClass := "hx:w-full hx:resize-none hx:rounded-md hx:border hx:border-blue-200 hx:bg-blue-50/70 hx:px-3 hx:py-2 hx:text-xl hx:font-semibold hx:text-blue-950 hx:shadow-sm hx:outline-none focus:hx:bg-white/60 hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:dark:focus:hx:bg-blue-950/20" -}}
+{{- $subfieldDisplayClass := "hextra-card-subfield hx:mt-0 hx:mb-2 hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:break-words hx:cursor-text" -}}
+{{- $subfieldInputClass := "hx:w-full hx:resize-y hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:outline-none focus:hx:bg-white/60 hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:dark:focus:hx:bg-blue-950/20" -}}
 
 {{- /* var metadata auto-configure readonly tag and class. */ -}}
 {{- if $varReadonly -}}
@@ -112,33 +132,144 @@
         {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
         {{- $title -}}
       </a>
+    {{- else if $canEditProfileCard -}}
+      <div class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
+        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-title" $fieldID)
+          "apiPath" "/api/profiles"
+          "field" "name"
+          "key" $title
+          "bindKeyToDisplay" true
+          "pageRelPermalink" $pageRelPermalink
+          "value" $title
+          "deleteOnEmptySubmit" true
+          "deleteEntityLabel" "profile"
+          "deleteApiBase" "/api/profiles"
+          "deleteSection" "profiles"
+          "deleteUseAlpineModal" true
+          "displayClass" $titleEditorDisplayClass
+          "inputClass" $titleEditorInputClass
+          "ariaLabel" "Edit profile name"
+          "emptyDisplay" $title
+        ) -}}
+      </div>
+    {{- else if $canEditServiceCard -}}
+      <div class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
+        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-title" $fieldID)
+          "apiPath" "/api/services"
+          "field" "name"
+          "key" $title
+          "bindKeyToDisplay" true
+          "pageRelPermalink" $pageRelPermalink
+          "value" $title
+          "deleteOnEmptySubmit" true
+          "deleteEntityLabel" "service"
+          "deleteApiBase" "/api/services"
+          "deleteSection" "services"
+          "deleteUseAlpineModal" true
+          "displayClass" $titleEditorDisplayClass
+          "inputClass" $titleEditorInputClass
+          "ariaLabel" "Edit service name"
+          "emptyDisplay" $title
+        ) -}}
+      </div>
+    {{- else if $canEditSetCard -}}
+      <div class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
+        {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-title" $fieldID)
+          "apiPath" "/api/sets"
+          "field" "name"
+          "key" $title
+          "bindKeyToDisplay" true
+          "pageRelPermalink" $pageRelPermalink
+          "value" $title
+          "deleteOnEmptySubmit" true
+          "deleteEntityLabel" "set"
+          "deleteApiBase" "/api/sets"
+          "deleteSection" "sets"
+          "deleteUseAlpineModal" true
+          "displayClass" $titleEditorDisplayClass
+          "inputClass" $titleEditorInputClass
+          "ariaLabel" "Edit set name"
+          "emptyDisplay" $title
+        ) -}}
+      </div>
     {{- else -}}
       <span class="hextra-card-icon hx:flex hx:font-semibold hx:items-center {{ $iconGapClass }} {{ $padding }} {{ $titleSize }} hx:text-gray-700 hx:hover:text-gray-900 hx:dark:text-neutral-200 hx:dark:hover:text-neutral-50 {{ $titleClass }}">
         {{- with $iconImage }}<img alt="" aria-hidden="true" src="{{ . | safeURL }}" class="{{ $iconImageClass }}" />{{- else -}}{{- with $icon }}{{ partial "utils/icon.html" (dict "name" $icon "attributes" $iconAttributes) -}}{{- end -}}{{- end -}}
         {{- $title -}}
       </span>
     {{- end -}}
-    {{- with $description -}}
+    {{- if or $description $canEditServiceCard $canEditSetCard -}}
       {{- $subtitleClass := "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-2" -}}
       {{- if and (eq $cardType "service") (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
         {{- $subtitleClass = "hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0 hx:line-clamp-3" -}}
       {{- else if and (not (in $description "\n\n")) (not (in $description "<pre>")) (not (in $description "<br><br>")) (not (strings.HasPrefix $description "    ")) (not (in $description "\n    ")) -}}
         {{- $subtitleClass = printf "%s %s" $subtitleClass "hx:line-clamp-3" -}}
       {{- end -}}
-      <div class="{{ $subtitleClass }}">{{- $description | markdownify -}}</div>
+      {{- if or $canEditServiceCard $canEditSetCard -}}
+        {{- $apiPath := cond $canEditServiceCard "/api/services" "/api/sets" -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-description" $fieldID)
+          "apiPath" $apiPath
+          "field" "description"
+          "pageRelPermalink" $pageRelPermalink
+          "value" $description
+          "wrapperClass" "not-prose hx:px-4 hx:mb-2 hx:mt-0"
+          "displayClass" $subfieldDisplayClass
+          "inputClass" $subfieldInputClass
+          "ariaLabel" "Edit description"
+          "emptyDisplay" "Add description"
+        ) -}}
+      {{- else -}}
+        <div class="{{ $subtitleClass }}">{{- $description | markdownify -}}</div>
+      {{- end -}}
     {{- end -}}
-    {{- with $descriptionLink -}}
+    {{- if or $descriptionLink $canEditServiceCard $canEditSetCard -}}
       {{- $readmeLabel := i18n "readme" | default "More info" -}}
-      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">
-        <a href="{{ $descriptionLink | safeURL }}" class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline"{{ if strings.HasPrefix $descriptionLink "http" }} target="_blank" rel="noreferrer"{{ end }}>
-          {{- partial "utils/icon.html" (dict "name" "readme") -}}
-          <span>{{ $readmeLabel | plainify }}</span>
-        </a>
-      </div>
+      {{- if or $canEditServiceCard $canEditSetCard -}}
+        {{- $apiPath := cond $canEditServiceCard "/api/services" "/api/sets" -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-link" $fieldID)
+          "apiPath" $apiPath
+          "field" "link"
+          "pageRelPermalink" $pageRelPermalink
+          "value" $descriptionLink
+          "wrapperClass" "not-prose hx:px-4 hx:mb-2 hx:mt-0"
+          "displayClass" $subfieldDisplayClass
+          "inputClass" $subfieldInputClass
+          "ariaLabel" "Edit documentation link"
+          "emptyDisplay" ($readmeLabel | plainify)
+        ) -}}
+      {{- else -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">
+          <a href="{{ $descriptionLink | safeURL }}" class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300 hx:no-underline hover:hx:underline"{{ if strings.HasPrefix $descriptionLink "http" }} target="_blank" rel="noreferrer"{{ end }}>
+            {{- partial "utils/icon.html" (dict "name" "readme") -}}
+            <span>{{ $readmeLabel | plainify }}</span>
+          </a>
+        </div>
+      {{- end -}}
     {{- end -}}
-    {{- with $dockerImage -}}
+    {{- if or $dockerImage $canEditServiceCard -}}
       {{- $dockerImageLooksFormatted := or (in $dockerImage "**") (or (in $dockerImage "[") (or (in $dockerImage "<br>") (in $dockerImage "\n"))) -}}
-      {{- if and (eq $cardType "service") (not $dockerImageLooksFormatted) -}}
+      {{- if $canEditServiceCard -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-image" $fieldID)
+          "apiPath" "/api/services"
+          "field" "image"
+          "pageRelPermalink" $pageRelPermalink
+          "value" $dockerImage
+          "wrapperClass" "not-prose hx:px-4 hx:mb-2 hx:mt-0"
+          "displayClass" $subfieldDisplayClass
+          "inputClass" $subfieldInputClass
+          "ariaLabel" "Edit service image"
+          "emptyDisplay" "Add image"
+        ) -}}
+      {{- else if and (eq $cardType "service") (not $dockerImageLooksFormatted) -}}
         {{- $imageMarkdown := printf "**Image:** %s" $dockerImage -}}
         {{- if $dockerImageLink -}}
           {{- $imageMarkdown = printf "**Image:** [%s](%s)" $dockerImage $dockerImageLink -}}
@@ -148,10 +279,25 @@
         <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-400 hx:dark:text-gray-500 hx:px-4 hx:mb-2 hx:mt-0">{{- $dockerImage | markdownify -}}</div>
       {{- end -}}
     {{- end -}}
-    {{- if and (eq $cardType "service") $platform -}}
-      {{- $platformLabel := i18n "platform" | default "Platform" -}}
-      {{- $platformMarkdown := printf "**%s:** %s" $platformLabel ($platform | plainify) -}}
-      <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $platformMarkdown | markdownify -}}</div>
+    {{- if and (eq $cardType "service") (or $platform $canEditServiceCard) -}}
+      {{- if $canEditServiceCard -}}
+        {{- partial "shortcodes/editable-field.html" (dict
+          "fieldID" (printf "%s-platform" $fieldID)
+          "apiPath" "/api/services"
+          "field" "platform"
+          "pageRelPermalink" $pageRelPermalink
+          "value" $platform
+          "wrapperClass" "not-prose hx:px-4 hx:mb-2 hx:mt-0"
+          "displayClass" $subfieldDisplayClass
+          "inputClass" $subfieldInputClass
+          "ariaLabel" "Edit service platform"
+          "emptyDisplay" "Add platform"
+        ) -}}
+      {{- else -}}
+        {{- $platformLabel := i18n "platform" | default "Platform" -}}
+        {{- $platformMarkdown := printf "**%s:** %s" $platformLabel ($platform | plainify) -}}
+        <div class="hextra-card-subtitle hx:text-sm hx:font-normal hx:text-gray-500 hx:dark:text-gray-400 hx:px-4 hx:mb-2 hx:mt-0">{{- $platformMarkdown | markdownify -}}</div>
+      {{- end -}}
     {{- end -}}
     {{- with $command -}}
       {{- $cmdLooksFormatted := hasPrefix $command "**" -}}
@@ -221,15 +367,59 @@
       <div class="hextra-card-html">{{ . | safeHTML }}</div>
     {{- end -}}
     {{- if $varValue -}}
-      {{- $editable := "true" -}}
-      {{- $preClass := "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100" -}}
-      {{- $codeClass := "hx:block hx:whitespace-pre hx:font-mono hx:outline-none hx:cursor-text focus:hx:bg-white/60 hx:dark:focus:hx:bg-blue-950/20" -}}
+      {{- $valueClass := "hextra-card-subfield hx:mt-0 hx:mb-4 hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:break-words" -}}
+      {{- $inputClass := "hx:w-full hx:resize-y hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-blue-200 hx:bg-blue-50/70 hx:text-blue-950 hx:shadow-sm hx:outline-none focus:hx:bg-white/60 hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:dark:focus:hx:bg-blue-950/20" -}}
       {{- if $varReadonly -}}
-        {{- $editable = "false" -}}
-        {{- $preClass = "hx:mt-0 hx:mb-4 hx:overflow-x-auto hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100" -}}
-        {{- $codeClass = "hx:block hx:whitespace-pre hx:font-mono hx:outline-none hx:cursor-default hx:select-text" -}}
+        {{- $valueClass = "hextra-card-subfield hx:mt-0 hx:mb-4 hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100 hx:break-words hx:cursor-default hx:select-text" -}}
+        {{- $inputClass = "hx:w-full hx:resize-y hx:rounded-md hx:border hx:px-3 hx:py-2 hx:text-sm hx:transition-colors hx:border-yellow-200 hx:bg-yellow-50/80 hx:text-yellow-950 hx:shadow-sm hx:outline-none hx:dark:border-yellow-200/30 hx:dark:bg-yellow-900/20 hx:dark:text-yellow-100" -}}
       {{- end -}}
-      <div class="not-prose hx:px-4 hx:pt-4"><pre class="{{ $preClass }}" data-editable="{{ $editable }}"><code class="{{ $codeClass }}" contenteditable="{{ $editable }}" spellcheck="false">{{- $varValue -}}</code></pre></div>
+      {{- if and $isSetVarCard (not $varReadonly) $editorEnabled -}}
+        <div class="not-prose hx:px-4 hx:pt-4">
+          <form
+            id="{{ $fieldID }}-form"
+            class="hx:space-y-2"
+            x-data='envyEditor({"initialValue": {{ $varValue | jsonify }}})'
+            x-ref="form"
+            hx-post="/api/vars"
+            hx-swap="none"
+          >
+            <input id="{{ $fieldID }}-key" type="hidden" name="key" value="{{ $title }}" />
+            <input id="{{ $fieldID }}-page" type="hidden" name="page" value="{{ $pageRelPermalink }}" />
+            <div
+              id="{{ $fieldID }}-display"
+              class="{{ $valueClass }} hx:cursor-text"
+              role="button"
+              tabindex="0"
+              aria-label="Edit value"
+              x-bind:class="flashClasses()"
+              x-show="!isEditing"
+              x-on:click="enterEdit()"
+              x-on:keydown.enter.prevent="enterEdit()"
+              x-on:keydown.space.prevent="enterEdit()"
+              x-text="displayValue"
+            ></div>
+            <div id="{{ $fieldID }}-editor" x-show="isEditing">
+              <textarea
+                id="{{ $fieldID }}-value"
+                name="value"
+                rows="1"
+                class="{{ $inputClass }}"
+                x-ref="input"
+                x-model="draftValue"
+                x-bind:class="flashClasses()"
+                spellcheck="false"
+                x-on:blur="cancelEdit()"
+                x-on:keydown.enter.prevent="submitEdit()"
+                x-on:keydown.escape.prevent="cancelEdit()"
+              ></textarea>
+            </div>
+          </form>
+        </div>
+      {{- else -}}
+        <div class="not-prose hx:px-4 hx:pt-4">
+          <div class="{{ $valueClass }}">{{- $varValue -}}</div>
+        </div>
+      {{- end -}}
     {{- end -}}
     {{- if $varReadonly -}}
       <div class="hextra-card-subtitle hx:px-4 hx:py-4 hx:mt-0">
