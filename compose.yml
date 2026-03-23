@@ -2,7 +2,7 @@
 x-envy:
   HUGO_TITLE: Envy
   HUGO_PARAMS_DESCRIPTION: >
-    Envy is an environment variable manager for Docker. This website renders the automatic documentation for the compose.yaml example file included with the GitHub repo.
+    Envy is an environment variable manager for Docker. This website renders the automatic documentation for the compose.yml example file included with the GitHub repo.
   HUGO_LANGUAGE_CODE: en-US
   HUGO_IGNORE_LOGS:
     - warning-goldmark-raw-html
@@ -28,7 +28,7 @@ x-set-base: &base
   INVENIO_RDM_CITATION_STYLES_DEFAULT: "${INVENIO_RDM_CITATION_STYLES_DEFAULT:-}"
   INVENIO_SEARCH_HOSTS: "${INVENIO_SEARCH_HOSTS:-['search:9200']}"
   INVENIO_SEARCH_INDEX_PREFIX: "${INVENIO_SEARCH_INDEX_PREFIX:-invenio-rdm-}"
-  # TEST_HARDCODED_VAR is a hardcoded test variable and cannot be edited in generated compose.yaml files.
+  # TEST_HARDCODED_VAR is a hardcoded test variable and cannot be edited in generated compose.yml files.
   TEST_HARDCODED_VAR: "locked-value"
   # TEST_REQUIRED_VAR is a required test variable and must be provided.
   TEST_REQUIRED_VAR: "${TEST_REQUIRED_VAR:-?required-value}"

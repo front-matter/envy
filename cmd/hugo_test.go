@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/front-matter/envy/compose"
 	"gopkg.in/yaml.v3"
@@ -79,6 +81,155 @@ func TestHasFlag(t *testing.T) {
 	}
 	if hasFlag(args, "--renderToMemory") {
 		t.Fatal("did not expect unrelated flag to be detected")
+	}
+}
+
+func TestRunHugoCommandBuildAbortsOnValidationError(t *testing.T) {
+	originalRunner := composeConfigRunner
+	originalManifestPath := manifestPath
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	t.Cleanup(func() {
+		composeConfigRunner = originalRunner
+		manifestPath = originalManifestPath
+		if chdirErr := os.Chdir(originalWD); chdirErr != nil {
+			t.Fatalf("failed to restore cwd: %v", chdirErr)
+		}
+	})
+
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "compose.yml"), []byte("x-envy:\n  title: Example\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("Chdir(%s) error = %v", tmp, err)
+	}
+
+	composeConfigRunner = func(_ string) (string, error) {
+		return "validation failed in test", errors.New("exit status 1")
+	}
+	manifestPath = ""
+
+	err = runHugoCommand("build", nil)
+	if err == nil {
+		t.Fatalf("expected build to abort on validation error")
+	}
+	if !strings.Contains(err.Error(), "envy build aborted: validation failed") {
+		t.Fatalf("expected build abort prefix, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "validation failed in test") {
+		t.Fatalf("expected wrapped validate output, got: %v", err)
+	}
+}
+
+func TestParseWatchFlag(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantWatch bool
+		wantArgs  []string
+		wantErr   bool
+	}{
+		{
+			name:      "watch enabled by standalone flag",
+			args:      []string{"--bind", "0.0.0.0", "--watch"},
+			wantWatch: true,
+			wantArgs:  []string{"--bind", "0.0.0.0"},
+		},
+		{
+			name:      "watch enabled by explicit true",
+			args:      []string{"--watch=true", "--bind", "0.0.0.0"},
+			wantWatch: true,
+			wantArgs:  []string{"--bind", "0.0.0.0"},
+		},
+		{
+			name:      "watch disabled by explicit false",
+			args:      []string{"--watch=false", "--bind", "0.0.0.0"},
+			wantWatch: false,
+			wantArgs:  []string{"--bind", "0.0.0.0"},
+		},
+		{
+			name:    "invalid watch value errors",
+			args:    []string{"--watch=maybe"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			watchEnabled, filtered, err := parseWatchFlag(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for args %v", tt.args)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseWatchFlag(%v) error = %v", tt.args, err)
+			}
+			if watchEnabled != tt.wantWatch {
+				t.Fatalf("parseWatchFlag(%v) watch = %v, want %v", tt.args, watchEnabled, tt.wantWatch)
+			}
+			if len(filtered) != len(tt.wantArgs) {
+				t.Fatalf("parseWatchFlag(%v) filtered len = %d, want %d (%v)", tt.args, len(filtered), len(tt.wantArgs), filtered)
+			}
+			for i := range filtered {
+				if filtered[i] != tt.wantArgs[i] {
+					t.Fatalf("parseWatchFlag(%v) filtered[%d] = %q, want %q", tt.args, i, filtered[i], tt.wantArgs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestComposeManifestChangedDetectsSizeChange(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	if err := os.WriteFile(path, []byte("x-envy:\n  title: Example\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	prev, err := composeManifestState(path)
+	if err != nil {
+		t.Fatalf("composeManifestState() error = %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("x-envy:\n  title: Example Updated\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(updated) error = %v", err)
+	}
+
+	changed, _, err := composeManifestChanged(path, prev)
+	if err != nil {
+		t.Fatalf("composeManifestChanged() error = %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected size change to be detected")
+	}
+}
+
+func TestComposeManifestChangedNoChange(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	if err := os.WriteFile(path, []byte("x-envy:\n  title: Example\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	prev, err := composeManifestState(path)
+	if err != nil {
+		t.Fatalf("composeManifestState() error = %v", err)
+	}
+
+	// Ensure filesystem timestamp can advance if needed on slower timestamp resolutions.
+	time.Sleep(10 * time.Millisecond)
+
+	changed, _, err := composeManifestChanged(path, prev)
+	if err != nil {
+		t.Fatalf("composeManifestChanged() error = %v", err)
+	}
+	if changed {
+		t.Fatalf("expected no change to be detected")
 	}
 }
 
@@ -733,6 +884,40 @@ func TestUsesGeneratedHugoSite(t *testing.T) {
 		if got := usesGeneratedHugoSite(tt.subcommand); got != tt.want {
 			t.Fatalf("usesGeneratedHugoSite(%q) = %v, want %v", tt.subcommand, got, tt.want)
 		}
+	}
+}
+
+func TestSyncBuildAssetsPreservesEmbeddedIcons(t *testing.T) {
+	siteRoot := t.TempDir()
+	manifestPath := filepath.Join(siteRoot, "compose.yml")
+	manifest := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"services:",
+		"  web:",
+		"    image: ghcr.io/front-matter/invenio-rdm-starter:latest",
+	}, "\n")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml): %v", err)
+	}
+
+	siteDir, err := prepareBuildAssets(manifestPath, false)
+	if err != nil {
+		t.Fatalf("prepareBuildAssets(): %v", err)
+	}
+	defer os.RemoveAll(siteDir)
+
+	iconsPath := filepath.Join(siteDir, "data", "icons.yaml")
+	if _, err := os.Stat(iconsPath); err != nil {
+		t.Fatalf("expected embedded icons to exist before sync, err=%v", err)
+	}
+
+	if err := syncBuildAssets(manifestPath, siteDir, false); err != nil {
+		t.Fatalf("syncBuildAssets(): %v", err)
+	}
+
+	if _, err := os.Stat(iconsPath); err != nil {
+		t.Fatalf("expected embedded icons to remain after sync, err=%v", err)
 	}
 }
 

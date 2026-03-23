@@ -8,10 +8,14 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/front-matter/envy/compose"
 	"github.com/spf13/cobra"
@@ -63,6 +67,21 @@ func init() {
 }
 
 func runHugoCommand(subcommand string, args []string) error {
+	watchEnabled := false
+	if subcommand == "server" {
+		var err error
+		watchEnabled, args, err = parseWatchFlag(args)
+		if err != nil {
+			return err
+		}
+	} else if hasFlag(args, "--watch") {
+		return fmt.Errorf("--watch is only supported with envy server")
+	}
+
+	if subcommand == "server" && watchEnabled {
+		return runHugoServerWithWatch(args)
+	}
+
 	hugoArgs := make([]string, 0, len(args)+3)
 	hugoArgs = append(hugoArgs, subcommand)
 	refreshPersistentContent := subcommand == "build" && hasFlag(args, "--cleanDestinationDir")
@@ -76,6 +95,12 @@ func runHugoCommand(subcommand string, args []string) error {
 		manifestFilePath, err := resolveBuildManifestPath()
 		if err != nil {
 			return err
+		}
+
+		if subcommand == "build" {
+			if err := validateComposeFile(manifestFilePath); err != nil {
+				return fmt.Errorf("envy build aborted: validation failed: %w", err)
+			}
 		}
 
 		buildSiteDir, err = prepareBuildAssets(manifestFilePath, refreshPersistentContent)
@@ -122,6 +147,152 @@ func runHugoCommand(subcommand string, args []string) error {
 	}
 
 	return nil
+}
+
+func runHugoServerWithWatch(args []string) error {
+	if hasConfigFlag(args) {
+		return fmt.Errorf("envy server uses compose.yaml as Hugo config source; remove --config/-c")
+	}
+
+	manifestFilePath, err := resolveBuildManifestPath()
+	if err != nil {
+		return err
+	}
+
+	hugoArgs := make([]string, 0, len(args)+1)
+	hugoArgs = append(hugoArgs, "server")
+	hugoArgs = append(hugoArgs, args...)
+
+	buildSiteDir, err := prepareBuildAssets(manifestFilePath, false)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(buildSiteDir)
+
+	command, _ := buildHugoExecCommand(hugoArgs)
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Dir = buildSiteDir
+	command.Env = append(os.Environ(),
+		"GOFLAGS=-mod=vendor",
+		"GONOSUMDB=*",
+		"GONOSUMCHECK=*",
+	)
+
+	if startErr := command.Start(); startErr != nil {
+		return fmt.Errorf("starting hugo server: %w", startErr)
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- command.Wait()
+	}()
+
+	fileState, err := composeManifestState(manifestFilePath)
+	if err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	for {
+		select {
+		case <-sigCh:
+			if command.Process != nil {
+				_ = command.Process.Signal(os.Interrupt)
+				select {
+				case <-waitCh:
+					return nil
+				case <-time.After(2 * time.Second):
+					if err := command.Process.Kill(); err != nil {
+						return err
+					}
+					<-waitCh
+				}
+			}
+			return nil
+		case waitErr := <-waitCh:
+			if waitErr != nil {
+				var exitErr *exec.ExitError
+				if errors.As(waitErr, &exitErr) {
+					return fmt.Errorf("hugo server exited with code %d", exitErr.ExitCode())
+				}
+				return fmt.Errorf("running hugo server: %w", waitErr)
+			}
+			return nil
+		case <-ticker.C:
+			changed, nextState, stateErr := composeManifestChanged(manifestFilePath, fileState)
+			if stateErr != nil {
+				return stateErr
+			}
+			if !changed {
+				continue
+			}
+
+			fmt.Fprintln(os.Stderr, "compose.yml changed, regenerating documentation content...")
+			if err := syncBuildAssets(manifestFilePath, buildSiteDir, false); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to regenerate site assets: %v\n", err)
+			}
+			fileState = nextState
+		}
+	}
+}
+
+func parseWatchFlag(args []string) (bool, []string, error) {
+	watchEnabled := false
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--watch" {
+			watchEnabled = true
+			continue
+		}
+		if strings.HasPrefix(arg, "--watch=") {
+			value := strings.TrimSpace(strings.TrimPrefix(arg, "--watch="))
+			if value == "" {
+				watchEnabled = true
+				continue
+			}
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return false, nil, fmt.Errorf("invalid --watch value %q; use true/false", value)
+			}
+			watchEnabled = parsed
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+
+	return watchEnabled, filtered, nil
+}
+
+type manifestFileState struct {
+	modTime time.Time
+	size    int64
+}
+
+func composeManifestState(path string) (manifestFileState, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return manifestFileState{}, fmt.Errorf("checking compose.yaml at %s: %w", path, err)
+	}
+	return manifestFileState{modTime: info.ModTime(), size: info.Size()}, nil
+}
+
+func composeManifestChanged(path string, previous manifestFileState) (bool, manifestFileState, error) {
+	current, err := composeManifestState(path)
+	if err != nil {
+		return false, manifestFileState{}, err
+	}
+	if !current.modTime.Equal(previous.modTime) || current.size != previous.size {
+		return true, current, nil
+	}
+	return false, previous, nil
 }
 
 func buildHugoExecCommand(args []string) (*exec.Cmd, string) {
@@ -182,13 +353,6 @@ func resolveBuildManifestPath() (string, error) {
 }
 
 func prepareBuildAssets(path string, refreshPersistentContent bool) (string, error) {
-	m, err := compose.Load(path)
-	if err != nil {
-		return "", err
-	}
-
-	manifestDir := filepath.Dir(path)
-
 	siteDir, err := os.MkdirTemp("", "envy-hugo-site-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temporary Hugo site directory: %w", err)
@@ -206,30 +370,48 @@ func prepareBuildAssets(path string, refreshPersistentContent bool) (string, err
 		return "", fmt.Errorf("writing Hugo site go.mod: %w", err)
 	}
 
-	contentDir, err := prepareBuildContentDirWithOptions(manifestDir, m, refreshPersistentContent)
-	if err != nil {
-		os.RemoveAll(siteDir)
-		return "", err
-	}
-
-	if err := copyDirIfExists(contentDir, filepath.Join(siteDir, "content")); err != nil {
-		os.RemoveAll(siteDir)
-		return "", err
-	}
-
-	if err := copyDirIfExists(filepath.Join(manifestDir, "data"), filepath.Join(siteDir, "data")); err != nil {
-		os.RemoveAll(siteDir)
-		return "", err
-	}
-
-	repoURL := detectRepositoryURL(manifestDir)
-
-	if err := writeTempHugoConfigFromManifest(m, siteDir, repoURL); err != nil {
+	if err := syncBuildAssets(path, siteDir, refreshPersistentContent); err != nil {
 		os.RemoveAll(siteDir)
 		return "", err
 	}
 
 	return siteDir, nil
+}
+
+func syncBuildAssets(path, siteDir string, refreshPersistentContent bool) error {
+	m, err := compose.Load(path)
+	if err != nil {
+		return err
+	}
+
+	manifestDir := filepath.Dir(path)
+
+	contentDir, err := prepareBuildContentDirWithOptions(manifestDir, m, refreshPersistentContent)
+	if err != nil {
+		return err
+	}
+
+	contentDst := filepath.Join(siteDir, "content")
+	if err := os.RemoveAll(contentDst); err != nil {
+		return fmt.Errorf("clearing generated content directory: %w", err)
+	}
+
+	if err := copyDirIfExists(contentDir, contentDst); err != nil {
+		return err
+	}
+
+	dataDst := filepath.Join(siteDir, "data")
+	if err := copyDirIfExists(filepath.Join(manifestDir, "data"), dataDst); err != nil {
+		return err
+	}
+
+	repoURL := detectRepositoryURL(manifestDir)
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, repoURL); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func extractDocsFS(dst string) error {
