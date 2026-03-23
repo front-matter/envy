@@ -78,10 +78,8 @@ func TestMergeManifests(t *testing.T) {
 	}
 
 	env2 := &compose.Project{
-		Meta: compose.Meta{Title: "env2", Version: "v1"},
-		Services: []compose.Service{
-			{Name: "web", Image: "nginx:latest"},
-		},
+		Meta:     compose.Meta{Title: "env2", Version: "v1"},
+		Services: map[string]compose.Service{"web": {Name: "web", Image: "nginx:latest"}},
 		Sets: map[string]compose.Set{
 			"web": newReaderTestSet(types.MappingWithEquals{"APP_NAME": strPtr("myapp")}),
 			"db":  newReaderTestSet(types.MappingWithEquals{"DB_HOST": strPtr("db.example.com"), "DB_USER": strPtr("admin")}),
@@ -173,10 +171,8 @@ func TestMergeThreeManifests(t *testing.T) {
 
 func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
 	composeManifest := &compose.Project{
-		Meta: compose.Meta{Title: "compose", Version: "v1"},
-		Services: []compose.Service{
-			{Name: "web", Sets: []string{"web"}},
-		},
+		Meta:     compose.Meta{Title: "compose", Version: "v1"},
+		Services: map[string]compose.Service{"web": {Name: "web", Sets: []string{"web"}}},
 		Sets: map[string]compose.Set{
 			"web": newReaderTestSet(types.MappingWithEquals{"APP_ENV": strPtr("production"), "DB_HOST": strPtr("db")}),
 		},

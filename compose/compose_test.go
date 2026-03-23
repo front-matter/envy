@@ -22,6 +22,14 @@ func strPtr(value string) *string {
 	return &v
 }
 
+func serviceMap(services ...Service) map[string]Service {
+	out := make(map[string]Service, len(services))
+	for _, service := range services {
+		out[service.Name] = service
+	}
+	return out
+}
+
 func TestStringDefaultUnmarshalYAML(t *testing.T) {
 	tests := []struct {
 		name string
@@ -90,10 +98,10 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 			Title:   "Imported Compose Project",
 			Version: "v1",
 		},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:  "web",
 			Image: "ghcr.io/example/web:latest",
-		}},
+		}),
 		Sets: map[string]Set{
 			"web": newTestSet(types.MappingWithEquals{"APP_ENV": strPtr("")}),
 		},
@@ -127,10 +135,10 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
-		Services: []Service{
-			{Name: "web", Sets: []string{"web"}},
-			{Name: "cache", Sets: []string{"cache"}},
-		},
+		Services: serviceMap(
+			Service{Name: "web", Sets: []string{"web"}},
+			Service{Name: "cache", Sets: []string{"cache"}},
+		),
 		Sets: map[string]Set{
 			"web":   newTestSet(types.MappingWithEquals{"APP_ENV": nil}),
 			"cache": newTestSet(nil),
@@ -186,12 +194,12 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:    "worker",
 			Image:   "ghcr.io/example/worker:latest",
 			Command: []string{"celery", "worker"},
 			Sets:    []string{"app"},
-		}},
+		}),
 		Sets: map[string]Set{
 			"app": newTestSet(types.MappingWithEquals{"CELERY_BROKER_URL": nil}),
 		},
@@ -280,11 +288,11 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	if len(m.Services) != 1 || m.Services[0].Name != "web" {
+	if len(m.Services) != 1 || m.Services["web"].Name != "web" {
 		t.Fatalf("expected one service named web, got %+v", m.Services)
 	}
-	if len(m.Services[0].Sets) != 1 || m.Services[0].Sets[0] != "application" {
-		t.Fatalf("expected service set application, got %+v", m.Services[0].Sets)
+	if len(m.Services["web"].Sets) != 1 || m.Services["web"].Sets[0] != "application" {
+		t.Fatalf("expected service set application, got %+v", m.Services["web"].Sets)
 	}
 
 	set, ok := m.Sets["application"]
@@ -321,8 +329,8 @@ func TestManifestLoadServiceScalarSet(t *testing.T) {
 	if len(m.Services) != 1 {
 		t.Fatalf("expected one service, got %+v", m.Services)
 	}
-	if len(m.Services[0].Sets) != 1 || m.Services[0].Sets[0] != "coolify" {
-		t.Fatalf("expected scalar sets value to normalize to [coolify], got %+v", m.Services[0].Sets)
+	if len(m.Services["web"].Sets) != 1 || m.Services["web"].Sets[0] != "coolify" {
+		t.Fatalf("expected scalar sets value to normalize to [coolify], got %+v", m.Services["web"].Sets)
 	}
 }
 
@@ -346,8 +354,8 @@ func TestManifestLoadServiceDescriptionFromComments(t *testing.T) {
 	if len(m.Services) != 1 {
 		t.Fatalf("expected one service, got %+v", m.Services)
 	}
-	if m.Services[0].Description != "Describes db service configuration." {
-		t.Fatalf("expected service description from comment, got %q", m.Services[0].Description)
+	if m.Services["db"].Description != "Describes db service configuration." {
+		t.Fatalf("expected service description from comment, got %q", m.Services["db"].Description)
 	}
 }
 
@@ -372,11 +380,11 @@ func TestManifestLoadServiceDescriptionFromInterEntryComments(t *testing.T) {
 	if len(m.Services) != 2 {
 		t.Fatalf("expected two services, got %+v", m.Services)
 	}
-	if m.Services[1].Name != "db" {
-		t.Fatalf("expected second service db, got %q", m.Services[1].Name)
+	if m.Services["db"].Name != "db" {
+		t.Fatalf("expected service db, got %q", m.Services["db"].Name)
 	}
-	if m.Services[1].Description != "Describes db service configuration. Additional line." {
-		t.Fatalf("expected multi-line service description from comments, got %q", m.Services[1].Description)
+	if m.Services["db"].Description != "Describes db service configuration. Additional line." {
+		t.Fatalf("expected multi-line service description from comments, got %q", m.Services["db"].Description)
 	}
 }
 
@@ -397,8 +405,8 @@ func TestManifestLoadServiceDescriptionFromCommentsWithStandaloneLink(t *testing
 	}
 
 	want := "Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/"
-	if m.Services[0].Description != want {
-		t.Fatalf("expected service description with standalone link preserved, got %q", m.Services[0].Description)
+	if m.Services["search"].Description != want {
+		t.Fatalf("expected service description with standalone link preserved, got %q", m.Services["search"].Description)
 	}
 }
 
@@ -673,7 +681,7 @@ func TestAllVarsReturnsMergedMap(t *testing.T) {
 
 func TestVarsForServiceReturnsMergedSetVars(t *testing.T) {
 	m := &Project{
-		Services: []Service{{Name: "web", Sets: []string{"base", "web"}}},
+		Services: serviceMap(Service{Name: "web", Sets: []string{"base", "web"}}),
 		Sets: map[string]Set{
 			"base": newTestSet(types.MappingWithEquals{"APP_ENV": strPtr("production")}),
 			"web":  newTestSet(types.MappingWithEquals{"PORT": strPtr("8080")}),
@@ -742,12 +750,12 @@ func TestIsValidImageReference(t *testing.T) {
 func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 	m := &Project{
 		Meta: Meta{Title: "Example"},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:     "web",
 			Image:    "https://ghcr.io/front-matter/app:latest",
 			Platform: "linux",
 			Sets:     []string{"application"},
-		}},
+		}),
 		Sets: map[string]Set{"application": {}},
 	}
 
@@ -773,11 +781,11 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 func TestLintRejectsLatestTag(t *testing.T) {
 	m := &Project{
 		Meta: Meta{Title: "Example"},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:  "web",
 			Image: "ghcr.io/front-matter/invenio-rdm-starter:latest",
 			Sets:  []string{"application"},
-		}},
+		}),
 		Sets: map[string]Set{"application": {}},
 	}
 
@@ -798,11 +806,11 @@ func TestLintRejectsLatestTag(t *testing.T) {
 func TestLintErrorsWhenSetIsUnusedByServices(t *testing.T) {
 	m := &Project{
 		Meta: Meta{Title: "Example"},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:  "web",
 			Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
 			Sets:  []string{"app"},
-		}},
+		}),
 		Sets: map[string]Set{
 			"app":    {},
 			"unused": {},
@@ -826,11 +834,11 @@ func TestLintErrorsWhenSetIsUnusedByServices(t *testing.T) {
 func TestLintDoesNotErrorWhenAllSetsAreUsed(t *testing.T) {
 	m := &Project{
 		Meta: Meta{Title: "Example"},
-		Services: []Service{{
+		Services: serviceMap(Service{
 			Name:  "web",
 			Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
 			Sets:  []string{"app", "shared"},
-		}},
+		}),
 		Sets: map[string]Set{
 			"app":    {},
 			"shared": {},

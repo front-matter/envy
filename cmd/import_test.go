@@ -199,7 +199,7 @@ func TestImportCommandPreservesImportedVarsInOutput(t *testing.T) {
 
 func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 	m := &compose.Project{
-		Services: []compose.Service{{
+		Services: map[string]compose.Service{"worker": {
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
 			Sets:    []string{"worker"},
@@ -216,7 +216,7 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 
 func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 	m := &compose.Project{
-		Services: []compose.Service{{
+		Services: map[string]compose.Service{"worker": {
 			Name:    "worker",
 			Command: []string{"--broker=${BROKER_URL:-redis://cache:6379/0}"},
 			Sets:    []string{"worker"},

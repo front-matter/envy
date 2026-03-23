@@ -5,7 +5,6 @@ go 1.25.0
 require (
 	github.com/compose-spec/compose-go/v2 v2.10.1
 	github.com/fatih/color v1.18.0
-	github.com/gohugoio/hugo v0.156.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1

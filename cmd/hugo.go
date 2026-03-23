@@ -2641,7 +2641,7 @@ func prepareBuildContentDirWithOptions(siteRoot string, m *compose.Project, refr
 			}
 		}
 
-		for _, service := range m.Services {
+		for _, service := range m.OrderedServices() {
 			pagePath := filepath.Join(servicesDir, sanitizeServicePageName(service.Name)+".md")
 			if err := writeGeneratedFile(contentDir, pagePath, generateServiceMarkdown(m, service, defaultLanguage)); err != nil {
 				return "", err
@@ -2866,7 +2866,7 @@ func generateServicesIndexMarkdown(m *compose.Project, language string) string {
 		},
 	}))
 	body.WriteString(renderCardsOpen(2))
-	for _, service := range m.Services {
+	for _, service := range m.OrderedServices() {
 		body.WriteString(renderServiceOverviewCard(service, language))
 	}
 	body.WriteString(renderAddServiceForm())
@@ -3289,8 +3289,8 @@ func setWeight(m *compose.Project, setKey string) int {
 }
 
 func serviceWeight(m *compose.Project, serviceName string) int {
-	for index, service := range m.Services {
-		if service.Name == serviceName {
+	for index, name := range m.OrderedServiceNames() {
+		if name == serviceName {
 			return index + 1
 		}
 	}
@@ -3349,7 +3349,7 @@ func projectProfiles(m *compose.Project) []string {
 	}
 
 	seen := make(map[string]struct{})
-	for _, service := range m.Services {
+	for _, service := range m.OrderedServices() {
 		for _, profile := range service.Profiles {
 			trimmed := strings.TrimSpace(profile)
 			if trimmed == "" {
@@ -3662,7 +3662,7 @@ func variableHeadingAnchor(key string) string {
 
 func servicesForSet(m *compose.Project, setKey string) []string {
 	services := make([]string, 0)
-	for _, service := range m.Services {
+	for _, service := range m.OrderedServices() {
 		for _, serviceSet := range service.Sets {
 			if serviceSet == setKey {
 				services = append(services, service.Name)
@@ -3684,7 +3684,7 @@ func servicesForProfile(m *compose.Project, profile string) []compose.Service {
 	}
 
 	services := make([]compose.Service, 0, len(m.Services))
-	for _, service := range m.Services {
+	for _, service := range m.OrderedServices() {
 		for _, candidate := range service.Profiles {
 			candidate = strings.TrimSpace(candidate)
 			if candidate == "" {
@@ -3706,7 +3706,7 @@ func servicesWithoutProfiles(m *compose.Project) []compose.Service {
 	}
 
 	services := make([]compose.Service, 0, len(m.Services))
-	for _, service := range m.Services {
+	for _, service := range m.OrderedServices() {
 		hasProfile := false
 		for _, candidate := range service.Profiles {
 			if strings.TrimSpace(candidate) != "" {

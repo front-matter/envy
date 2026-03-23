@@ -1513,23 +1513,27 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			HugoDefaultLanguage: "en",
 			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
 		},
-		Services: []compose.Service{{
-			Name:     "web",
-			Image:    "caddy:2.10",
-			Platform: "linux/amd64",
-			Command:  []string{"caddy", "run", "--config", "/etc/caddy/Caddyfile"},
-			Profiles: []string{"public", "debug"},
-			Sets:     []string{"common"},
-		}, {
-			Name:        "api",
-			Image:       "nginx:1.27",
-			Description: "Internal API service.",
-		}, {
-			Name:        "worker",
-			Image:       "busybox:1.36",
-			Description: "Background worker.",
-			Profiles:    []string{"internal"},
-		}},
+		Services: map[string]compose.Service{
+			"web": {
+				Name:     "web",
+				Image:    "caddy:2.10",
+				Platform: "linux/amd64",
+				Command:  []string{"caddy", "run", "--config", "/etc/caddy/Caddyfile"},
+				Profiles: []string{"public", "debug"},
+				Sets:     []string{"common"},
+			},
+			"api": {
+				Name:        "api",
+				Image:       "nginx:1.27",
+				Description: "Internal API service.",
+			},
+			"worker": {
+				Name:        "worker",
+				Image:       "busybox:1.36",
+				Description: "Background worker.",
+				Profiles:    []string{"internal"},
+			},
+		},
 		Sets: map[string]compose.Set{
 			"common": newHugoTestSet(
 				types.MappingWithEquals{
@@ -2332,10 +2336,12 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 func TestWriteTempHugoConfigFromManifestIncludesProfilesMenuWhenProfilesExist(t *testing.T) {
 	siteDir := t.TempDir()
 	m := &compose.Project{
-		Services: []compose.Service{{
-			Name:     "web",
-			Profiles: []string{"public"},
-		}},
+		Services: map[string]compose.Service{
+			"web": {
+				Name:     "web",
+				Profiles: []string{"public"},
+			},
+		},
 	}
 
 	if err := writeTempHugoConfigFromManifest(m, siteDir, "", ""); err != nil {
@@ -2420,10 +2426,12 @@ func TestPrepareBuildContentDirGeneratesProfilesIndexWhenNoProfilesExist(t *test
 			HugoDefaultLanguage: "en",
 			HugoLanguages:       "en:\n  languageName: English\n  weight: 1\nde:\n  languageName: Deutsch\n  weight: 2\n",
 		},
-		Services: []compose.Service{{
-			Name:  "web",
-			Image: "caddy:2.10",
-		}},
+		Services: map[string]compose.Service{
+			"web": {
+				Name:  "web",
+				Image: "caddy:2.10",
+			},
+		},
 	}
 
 	contentDir, err := prepareBuildContentDir(siteRoot, m)

@@ -20,13 +20,25 @@ var plainLinkPattern = regexp.MustCompile(`^https?://\S+$`)
 var prefixedLinkPattern = regexp.MustCompile(`(?i)^link:\s*(https?://\S+)$`)
 var composeInterpolationPattern = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])(.*))?\}$`)
 
-// Project is the top-level structure used by envy. It embeds compose-go's Project
-// as the canonical type and adds envy-specific metadata and functionality.
+// Project is the top-level structure used by envy and contains everything.
 type Project struct {
 	*types.Project
-	Meta     Meta           `yaml:"x-envy"`
-	Services Services       `yaml:"services"`
-	Sets     map[string]Set `yaml:"-"`
+	Node     *yaml.Node         `yaml:"-"`
+	Meta     Meta               `yaml:"x-envy"`
+	Services map[string]Service `yaml:"services"`
+	Sets     map[string]Set     `yaml:"-"`
+}
+
+// Service describes a compose service and the sets it uses.
+type Service struct {
+	Name        string   `yaml:"name"`
+	Image       string   `yaml:"image,omitempty"`
+	Platform    string   `yaml:"platform,omitempty"`
+	Entrypoint  []string `yaml:"entrypoint,omitempty"`
+	Command     []string `yaml:"command,omitempty"`
+	Profiles    []string `yaml:"profiles,omitempty"`
+	Description string   `yaml:"description,omitempty"`
+	Sets        []string `yaml:"-"`
 }
 
 // AnnotatedEnv is a helper type to decode environment variables with comments.
@@ -74,6 +86,13 @@ func extractKey(pair string) string {
 	return k
 }
 
+// cleanComment trims whitespace and leading # from a comment string.
+func cleanComment(c string) string {
+	c = strings.TrimSpace(c)
+	c = strings.TrimPrefix(c, "#")
+	return strings.TrimSpace(c)
+}
+
 // ServiceConfigWithComments extends compose-go's ServiceConfig
 // to include environment variables with comments.
 type ServiceConfigWithComments struct {
@@ -112,21 +131,6 @@ type Meta struct {
 	HugoDefaultLanguage      string   `yaml:"HUGO_DEFAULT_CONTENT_LANGUAGE,omitempty"`
 	HugoDefaultInSubdir      string   `yaml:"HUGO_DEFAULT_CONTENT_LANGUAGE_IN_SUBDIR,omitempty"`
 	HugoLanguages            string   `yaml:"HUGO_LANGUAGES,omitempty"`
-}
-
-// Services describes the ordered list of runtime services.
-type Services []Service
-
-// Service describes a runtime service and the sets it uses.
-type Service struct {
-	Name        string   `yaml:"name"`
-	Image       string   `yaml:"image,omitempty"`
-	Platform    string   `yaml:"platform,omitempty"`
-	Entrypoint  []string `yaml:"entrypoint,omitempty"`
-	Command     []string `yaml:"command,omitempty"`
-	Profiles    []string `yaml:"profiles,omitempty"`
-	Description string   `yaml:"description,omitempty"`
-	Sets        []string `yaml:"-"`
 }
 
 type serviceYAML struct {
@@ -283,12 +287,16 @@ func (m Project) MarshalYAML() (interface{}, error) {
 
 	if len(m.Services) > 0 {
 		servicesNode := &yaml.Node{Kind: yaml.MappingNode}
-		for _, svc := range m.Services {
+		for _, serviceName := range m.OrderedServiceNames() {
+			svc := m.Services[serviceName]
+			if strings.TrimSpace(svc.Name) == "" {
+				svc.Name = serviceName
+			}
 			encoded, err := encodeServiceNode(svc, setNodes)
 			if err != nil {
 				return nil, err
 			}
-			appendMapping(servicesNode, svc.Name, encoded)
+			appendMapping(servicesNode, serviceName, encoded)
 		}
 		appendMapping(root, "services", servicesNode)
 	}
@@ -384,11 +392,44 @@ func (m *Project) UnmarshalYAML(node *yaml.Node) error {
 	}
 
 	*m = out
+	if m.Services == nil {
+		m.Services = map[string]Service{}
+	}
 	if m.Sets == nil {
 		m.Sets = make(map[string]Set)
 	}
 	m.ensureComposeProject()
 	return nil
+}
+
+// OrderedServiceNames returns sorted service names from map-based services.
+func (m *Project) OrderedServiceNames() []string {
+	if m == nil || len(m.Services) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m.Services))
+	for key := range m.Services {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// OrderedServices returns services in deterministic order and normalizes empty Name from key.
+func (m *Project) OrderedServices() []Service {
+	keys := m.OrderedServiceNames()
+	if len(keys) == 0 {
+		return nil
+	}
+	services := make([]Service, 0, len(keys))
+	for _, key := range keys {
+		svc := m.Services[key]
+		if strings.TrimSpace(svc.Name) == "" {
+			svc.Name = key
+		}
+		services = append(services, svc)
+	}
+	return services
 }
 
 // VersionLabel returns the configured version label.
@@ -753,12 +794,12 @@ func encodeServiceNode(svc Service, setNodes map[string]*yaml.Node) (*yaml.Node,
 	return serviceNode, nil
 }
 
-func decodeServicesNode(node *yaml.Node) (Services, error) {
+func decodeServicesNode(node *yaml.Node) (map[string]Service, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("expected services mapping, got YAML kind %d", node.Kind)
 	}
 
-	services := make(Services, 0, len(node.Content)/2)
+	services := make(map[string]Service, len(node.Content)/2)
 	for i := 0; i < len(node.Content); i += 2 {
 		name := node.Content[i].Value
 		var svc Service
@@ -769,7 +810,7 @@ func decodeServicesNode(node *yaml.Node) (Services, error) {
 		if strings.TrimSpace(svc.Description) == "" {
 			svc.Description = extractServiceDescriptionFromComments(node, i)
 		}
-		services = append(services, svc)
+		services[name] = svc
 	}
 	return services, nil
 }
@@ -1242,7 +1283,7 @@ func (m *Project) VarsForServiceBySet(serviceName string) []SetVars {
 		return result
 	}
 
-	for _, svc := range m.Services {
+	for _, svc := range m.OrderedServices() {
 		if svc.Name != name {
 			continue
 		}
@@ -1271,7 +1312,7 @@ func (m *Project) VarsForService(serviceName string) types.MappingWithEquals {
 		return m.AllVars()
 	}
 
-	for _, svc := range m.Services {
+	for _, svc := range m.OrderedServices() {
 		if svc.Name != name {
 			continue
 		}
@@ -1334,7 +1375,7 @@ func (m *Project) LintIssues() []LintIssue {
 		})
 	}
 
-	for _, svc := range m.Services {
+	for _, svc := range m.OrderedServices() {
 		if strings.TrimSpace(svc.Name) == "" {
 			issues = append(issues, LintIssue{
 				Level:   "error",
@@ -1423,15 +1464,7 @@ func (m *Project) LintIssues() []LintIssue {
 	return issues
 }
 
-func areServiceNamesSorted(services Services) bool {
-	if len(services) < 2 {
-		return true
-	}
-	for i := 1; i < len(services); i++ {
-		if services[i-1].Name > services[i].Name {
-			return false
-		}
-	}
+func areServiceNamesSorted(services map[string]Service) bool {
 	return true
 }
 
@@ -1462,15 +1495,28 @@ func hasUnstableImageTag(image string) bool {
 	}
 }
 
-// Load reads and parses an compose.yaml file.
+// Load reads a compose file from the given path, parses it into a Project,
+// and preserves the raw YAML node for comment/round-trip access.
 func Load(path string) (*Project, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading manifest %s: %w", path, err)
+		return nil, fmt.Errorf("reading compose file %s: %w", path, err)
 	}
-	var m Project
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parsing manifest %s: %w", path, err)
+
+	// Parse into a raw yaml.Node to preserve everything (comments, ordering, etc.)
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("parsing compose file %s: %w", path, err)
 	}
-	return &m, nil
+
+	// Now unmarshal into Project structure
+	var p Project
+	if err := yaml.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("decoding compose file %s: %w", path, err)
+	}
+
+	// Store the raw node for potential round-trip use
+	p.Node = &root
+
+	return &p, nil
 }

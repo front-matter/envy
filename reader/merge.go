@@ -13,7 +13,7 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 	if len(manifests) == 0 {
 		return &compose.Project{
 			Meta:     compose.Meta{Title: "Merged Manifest", LanguageCode: "en-US", Version: "v1"},
-			Services: []compose.Service{},
+			Services: map[string]compose.Service{},
 			Sets:     make(map[string]compose.Set),
 		}
 	}
@@ -30,11 +30,13 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 			LanguageCode: "en-US",
 			Version:      "v1",
 		},
-		Services: make([]compose.Service, len(manifests[0].Services)),
+		Services: make(map[string]compose.Service, len(manifests[0].Services)),
 		Sets:     make(map[string]compose.Set),
 	}
 
-	copy(merged.Services, manifests[0].Services)
+	for name, service := range manifests[0].Services {
+		merged.Services[name] = service
+	}
 
 	// Copy sets from first manifest
 	for key, set := range manifests[0].Sets {
@@ -45,8 +47,10 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 	for i := 1; i < len(manifests); i++ {
 		m := manifests[i]
 
-		// Append services
-		merged.Services = append(merged.Services, m.Services...)
+		// Merge services with later manifests taking precedence.
+		for name, service := range m.Services {
+			merged.Services[name] = service
+		}
 
 		// Merge sets: combine variables with later sources taking precedence
 		for setKey, set := range m.Sets {
