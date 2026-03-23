@@ -12,17 +12,24 @@ import (
 	"testing"
 	"time"
 
+	types "github.com/compose-spec/compose-go/v2/types"
+
 	"github.com/front-matter/envy/compose"
 	"gopkg.in/yaml.v3"
 )
 
-func newHugoTestSet(vars []compose.Var, configure ...func(*compose.Set)) compose.Set {
+func newHugoTestSet(vars types.MappingWithEquals, configure ...func(*compose.Set)) compose.Set {
 	set := compose.NewSet()
 	set.SetVars(vars)
 	for _, fn := range configure {
 		fn(&set)
 	}
 	return set
+}
+
+func strPtr(value string) *string {
+	v := value
+	return &v
 }
 
 func TestNormalizeSetDocLink(t *testing.T) {
@@ -1525,7 +1532,13 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		}},
 		Sets: map[string]compose.Set{
 			"common": newHugoTestSet(
-				[]compose.Var{{Key: "ZZZ_LAST", Default: "z"}, {Key: "APP_ENV", Default: "production"}, {Key: "TEST_REQUIRED_PREFIX_VAR", Default: "?required-value"}, {Key: "TEST_VISIBLE_VAR", Default: "visible-value"}, {Key: "TEST_READONLY_VAR", Default: "locked-value"}},
+				types.MappingWithEquals{
+					"ZZZ_LAST":                 strPtr("z"),
+					"APP_ENV":                  strPtr("production"),
+					"TEST_REQUIRED_PREFIX_VAR": strPtr("?required-value"),
+					"TEST_VISIBLE_VAR":         strPtr("visible-value"),
+					"TEST_READONLY_VAR":        strPtr("locked-value"),
+				},
 				func(set *compose.Set) {
 					set.SetDescription("Shared settings for runtime services.")
 					set.SetLink("[Common Docs]: https://example.org/common")

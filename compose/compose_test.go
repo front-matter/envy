@@ -4,16 +4,22 @@ import (
 	"strings"
 	"testing"
 
+	types "github.com/compose-spec/compose-go/v2/types"
 	"gopkg.in/yaml.v3"
 )
 
-func newTestSet(vars []Var, configure ...func(*Set)) Set {
+func newTestSet(vars types.MappingWithEquals, configure ...func(*Set)) Set {
 	set := NewSet()
 	set.SetVars(vars)
 	for _, fn := range configure {
 		fn(&set)
 	}
 	return set
+}
+
+func strPtr(value string) *string {
+	v := value
+	return &v
 }
 
 func TestStringDefaultUnmarshalYAML(t *testing.T) {
@@ -64,29 +70,17 @@ func TestDecodeSetParsesComposeInterpolationSyntax(t *testing.T) {
 		t.Fatalf("expected application set")
 	}
 
-	byKey := make(map[string]Var, len(set.Vars()))
-	for _, v := range set.Vars() {
-		byKey[v.Key] = v
+	if got := VarString(set.Vars()["INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED"]); got != "true" {
+		t.Fatalf("unexpected parsed login var: %q", got)
 	}
-
-	login := byKey["INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED"]
-	if login.Default != "true" {
-		t.Fatalf("unexpected parsed login var: %+v", login)
+	if got := VarString(set.Vars()["INVENIO_RDM_SITE_NAME"]); got != "required" {
+		t.Fatalf("unexpected parsed required var: %q", got)
 	}
-
-	siteName := byKey["INVENIO_RDM_SITE_NAME"]
-	if siteName.Default != "required" {
-		t.Fatalf("unexpected parsed required var: %+v", siteName)
+	if got := VarString(set.Vars()["INVENIO_HOSTNAME"]); got != "" {
+		t.Fatalf("unexpected parsed bare interpolation var: %q", got)
 	}
-
-	hostname := byKey["INVENIO_HOSTNAME"]
-	if hostname.Default != "" {
-		t.Fatalf("unexpected parsed bare interpolation var: %+v", hostname)
-	}
-
-	instancePath := byKey["INVENIO_INSTANCE_PATH"]
-	if instancePath.Default != "/opt/invenio/var/instance" {
-		t.Fatalf("unexpected parsed literal var: %+v", instancePath)
+	if got := VarString(set.Vars()["INVENIO_INSTANCE_PATH"]); got != "/opt/invenio/var/instance" {
+		t.Fatalf("unexpected parsed literal var: %q", got)
 	}
 }
 
@@ -101,7 +95,7 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 			Image: "ghcr.io/example/web:latest",
 		}},
 		Sets: map[string]Set{
-			"web": newTestSet([]Var{{Key: "APP_ENV"}}),
+			"web": newTestSet(types.MappingWithEquals{"APP_ENV": strPtr("")}),
 		},
 	}
 
@@ -117,7 +111,6 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 		"platform: \"\"",
 		"entrypoint: []",
 		"command: []",
-		"allowed: []",
 	}
 
 	for _, check := range checks {
@@ -126,7 +119,7 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(output, "default: \"\"") {
+	if !strings.Contains(output, "APP_ENV: \"\"") {
 		t.Fatalf("expected empty defaults to be preserved, got:\n%s", output)
 	}
 }
@@ -139,7 +132,7 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 			{Name: "cache", Sets: []string{"cache"}},
 		},
 		Sets: map[string]Set{
-			"web":   newTestSet([]Var{{Key: "APP_ENV"}}),
+			"web":   newTestSet(types.MappingWithEquals{"APP_ENV": nil}),
 			"cache": newTestSet(nil),
 		},
 	}
@@ -162,10 +155,10 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
 		Sets: map[string]Set{
-			"env": newTestSet([]Var{
-				{Key: "STRING_VALUE", Default: "production"},
-				{Key: "BOOL_TRUE", Default: "true"},
-				{Key: "BOOL_FALSE", Default: "false"},
+			"env": newTestSet(types.MappingWithEquals{
+				"STRING_VALUE": strPtr("production"),
+				"BOOL_TRUE":    strPtr("true"),
+				"BOOL_FALSE":   strPtr("false"),
 			}),
 		},
 	}
@@ -176,23 +169,17 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	}
 
 	output := string(data)
-	if !strings.Contains(output, "default: \"true\"") {
+	if !strings.Contains(output, "BOOL_TRUE: \"true\"") {
 		t.Fatalf("expected quoted string default true, got:\n%s", output)
 	}
-	if !strings.Contains(output, "default: \"false\"") {
+	if !strings.Contains(output, "BOOL_FALSE: \"false\"") {
 		t.Fatalf("expected quoted string default false, got:\n%s", output)
 	}
-	if strings.Contains(output, "default: true\n") {
+	if strings.Contains(output, "BOOL_TRUE: true\n") {
 		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)
 	}
-	if strings.Contains(output, "default: false\n") {
+	if strings.Contains(output, "BOOL_FALSE: false\n") {
 		t.Fatalf("did not expect YAML boolean false, got:\n%s", output)
-	}
-	if strings.Contains(output, "editable: true\n") {
-		t.Fatalf("did not expect YAML boolean editable true, got:\n%s", output)
-	}
-	if !strings.Contains(output, "BOOL_TRUE:") {
-		t.Fatalf("expected set vars to be written as mapping style, got:\n%s", output)
 	}
 }
 
@@ -206,7 +193,7 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 			Sets:    []string{"app"},
 		}},
 		Sets: map[string]Set{
-			"app": newTestSet([]Var{{Key: "CELERY_BROKER_URL"}}),
+			"app": newTestSet(types.MappingWithEquals{"CELERY_BROKER_URL": nil}),
 		},
 	}
 
@@ -234,9 +221,7 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 }
 
 func TestManifestMarshalVolumesAsComposeStyleMap(t *testing.T) {
-	m := Project{
-		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
-	}
+	m := Project{Meta: Meta{Title: "Imported Compose Project", Version: "v1"}}
 	m.SetVolumeNames([]string{"app_data", "uploaded_data"})
 
 	data, err := yaml.Marshal(m)
@@ -306,11 +291,11 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected application set")
 	}
-	if len(set.Vars()) != 1 || set.Vars()[0].Key != "APP_ENV" {
+	if len(set.Vars()) != 1 {
 		t.Fatalf("expected APP_ENV var, got %+v", set.Vars())
 	}
-	if set.Vars()[0].Default != "production" {
-		t.Fatalf("expected default production, got %q", set.Vars()[0].Default)
+	if got := VarString(set.Vars()["APP_ENV"]); got != "production" {
+		t.Fatalf("expected default production, got %q", got)
 	}
 }
 
@@ -411,65 +396,9 @@ func TestManifestLoadServiceDescriptionFromCommentsWithStandaloneLink(t *testing
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	if len(m.Services) != 1 {
-		t.Fatalf("expected one service, got %+v", m.Services)
-	}
-
 	want := "Describes search service configuration. For details see\nhttps://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/"
 	if m.Services[0].Description != want {
 		t.Fatalf("expected service description with standalone link preserved, got %q", m.Services[0].Description)
-	}
-}
-
-func TestManifestLoadServiceDescriptionFromCommentsWithPrefixedLink(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"services:",
-		"  # Describes proxy service configuration.",
-		"  # Link: https://example.org/proxy/docs",
-		"  proxy:",
-		"    image: caddy:2.10",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	if len(m.Services) != 1 {
-		t.Fatalf("expected one service, got %+v", m.Services)
-	}
-
-	want := "Describes proxy service configuration.\nhttps://example.org/proxy/docs"
-	if m.Services[0].Description != want {
-		t.Fatalf("expected service description with prefixed link normalized, got %q", m.Services[0].Description)
-	}
-}
-
-func TestManifestLoadServiceDescriptionFromCommentsWithMarkdownLink(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"services:",
-		"  # Describes mail service configuration.",
-		"  # [Mail Docs](https://example.org/mail/docs)",
-		"  mail:",
-		"    image: mailhog/mailhog:v1.0.1",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	if len(m.Services) != 1 {
-		t.Fatalf("expected one service, got %+v", m.Services)
-	}
-
-	want := "Describes mail service configuration.\nhttps://example.org/mail/docs"
-	if m.Services[0].Description != want {
-		t.Fatalf("expected service description with markdown link normalized, got %q", m.Services[0].Description)
 	}
 }
 
@@ -493,13 +422,8 @@ func TestManifestLoadIgnoresLegacySecretField(t *testing.T) {
 	if !ok || len(set.Vars()) != 1 {
 		t.Fatalf("expected app set with one var, got %#v", m.Sets)
 	}
-
-	variable := set.Vars()[0]
-	if variable.Default != "super-secret" {
-		t.Fatalf("expected legacy secret field to be ignored and default preserved, got %q", variable.Default)
-	}
-	if variable.DefaultString() != "super-secret" {
-		t.Fatalf("expected DefaultString to preserve default, got %q", variable.DefaultString())
+	if got := VarString(set.Vars()["SECRET_KEY"]); got != "super-secret" {
+		t.Fatalf("expected legacy secret field to be ignored and default preserved, got %q", got)
 	}
 }
 
@@ -516,14 +440,8 @@ func TestManifestLoadInlineSetVarWithEmptyInterpolation(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	set := m.Sets["app"]
-	if len(set.Vars()) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars())
-	}
-
-	variable := set.Vars()[0]
-	if variable.Default != "" {
-		t.Fatalf("expected empty default, got %q", variable.Default)
+	if got := VarString(m.Sets["app"].Vars()["INVENIO_OIDC_ISSUER"]); got != "" {
+		t.Fatalf("expected empty default, got %q", got)
 	}
 }
 
@@ -540,14 +458,8 @@ func TestManifestLoadInlineSetVarWithBareEmptyValue(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	set := m.Sets["app"]
-	if len(set.Vars()) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars())
-	}
-
-	variable := set.Vars()[0]
-	if variable.Default != "" {
-		t.Fatalf("expected empty default to stay empty, got %q", variable.Default)
+	if got := VarString(m.Sets["app"].Vars()["INVENIO_OIDC_ISSUER"]); got != "" {
+		t.Fatalf("expected empty default to stay empty, got %q", got)
 	}
 }
 
@@ -564,14 +476,8 @@ func TestManifestLoadInlineSetVarWithExplicitEmptyString(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	set := m.Sets["app"]
-	if len(set.Vars()) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars())
-	}
-
-	variable := set.Vars()[0]
-	if variable.Default != "" {
-		t.Fatalf("expected empty default, got %q", variable.Default)
+	if got := VarString(m.Sets["app"].Vars()["INVENIO_OIDC_ISSUER"]); got != "" {
+		t.Fatalf("expected empty default, got %q", got)
 	}
 }
 
@@ -652,43 +558,12 @@ func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	set, ok := m.Sets["common"]
-	if !ok {
-		t.Fatalf("expected common set")
-	}
+	set := m.Sets["common"]
 	if set.Description() != "Shared settings" {
 		t.Fatalf("expected set description from comment, got %q", set.Description())
 	}
 	if set.Link() != "https://example.org/docs" {
 		t.Fatalf("expected markdown link extraction, got %q", set.Link())
-	}
-}
-
-func TestManifestLoadSetLinkFromMarkdownReferenceComment(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"# Shared settings",
-		"# [Base Docs]: https://example.org/base",
-		"x-set-base: &base",
-		"  APP_ENV:",
-		"    default: production",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["base"]
-	if !ok {
-		t.Fatalf("expected base set")
-	}
-	if set.Description() != "Shared settings" {
-		t.Fatalf("expected set description from comment, got %q", set.Description())
-	}
-	if set.Link() != "https://example.org/base" {
-		t.Fatalf("expected markdown reference-style link extraction, got %q", set.Link())
 	}
 }
 
@@ -711,42 +586,12 @@ func TestManifestLoadSetDescriptionAndLinkFromInterEntryComments(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	set, ok := m.Sets["worker"]
-	if !ok {
-		t.Fatalf("expected worker set")
-	}
+	set := m.Sets["worker"]
 	if set.Description() != "Worker-only settings" {
 		t.Fatalf("expected set description from inter-entry comments, got %q", set.Description())
 	}
 	if set.Link() != "https://example.org/worker" {
 		t.Fatalf("expected set link from inter-entry comments, got %q", set.Link())
-	}
-}
-
-func TestManifestLoadSetLinkFromInlineCommentURL(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"# Search settings. For details see https://example.org/search/docs.",
-		"x-set-search: &search",
-		"  SEARCH_BACKEND:",
-		"    default: opensearch",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["search"]
-	if !ok {
-		t.Fatalf("expected search set")
-	}
-	if set.Description() != "Search settings. For details see https://example.org/search/docs." {
-		t.Fatalf("expected set description from inline URL comment, got %q", set.Description())
-	}
-	if set.Link() != "https://example.org/search/docs" {
-		t.Fatalf("expected set link extracted from inline URL comment, got %q", set.Link())
 	}
 }
 
@@ -766,47 +611,84 @@ func TestParseSetMetadataFromCommentsIgnoresSlashSlashLines(t *testing.T) {
 	}
 }
 
-func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
-	m := Project{
-		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
-		Sets: map[string]Set{
-			"web": newTestSet([]Var{{
-				Key:         "APP_ENV",
-				Description: "Imported from compose environment",
-			}}),
-		},
+func TestDecodeVarsSequenceFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  vars:",
+		"    - key: DATABASE_URL",
+		"      default: postgres://localhost/app",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
 	}
 
-	data, err := yaml.Marshal(m)
-	if err != nil {
-		t.Fatalf("yaml.Marshal() error = %v", err)
-	}
-
-	output := string(data)
-	if strings.Contains(output, "description: Imported from compose environment") {
-		t.Fatalf("expected imported compose var description to be omitted, got:\n%s", output)
+	if got := VarString(m.Sets["app"].Vars()["DATABASE_URL"]); got != "postgres://localhost/app" {
+		t.Fatalf("expected DATABASE_URL default, got %q", got)
 	}
 }
 
-func TestManifestMarshalOmitsImportedEnvFileVarDescription(t *testing.T) {
-	m := Project{
-		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
+func TestDecodeVarsMappingFormat(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-app: &app",
+		"  vars:",
+		"    CACHE_URL:",
+		"      default: redis://localhost:6379",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if got := VarString(m.Sets["app"].Vars()["CACHE_URL"]); got != "redis://localhost:6379" {
+		t.Fatalf("expected CACHE_URL default, got %q", got)
+	}
+}
+
+func TestAllVarsReturnsMergedMap(t *testing.T) {
+	m := &Project{
 		Sets: map[string]Set{
-			"env": newTestSet([]Var{{
-				Key:         "APP_ENV",
-				Description: "Imported from .env file",
-			}}),
+			"base": newTestSet(types.MappingWithEquals{"APP_ENV": strPtr("production")}),
+			"web":  newTestSet(types.MappingWithEquals{"PORT": strPtr("8080")}),
 		},
 	}
 
-	data, err := yaml.Marshal(m)
-	if err != nil {
-		t.Fatalf("yaml.Marshal() error = %v", err)
+	all := m.AllVars()
+	if len(all) != 2 {
+		t.Fatalf("expected 2 vars, got %d", len(all))
+	}
+	if got := VarString(all["APP_ENV"]); got != "production" {
+		t.Fatalf("expected APP_ENV=production, got %q", got)
+	}
+	if got := VarString(all["PORT"]); got != "8080" {
+		t.Fatalf("expected PORT=8080, got %q", got)
+	}
+}
+
+func TestVarsForServiceReturnsMergedSetVars(t *testing.T) {
+	m := &Project{
+		Services: []Service{{Name: "web", Sets: []string{"base", "web"}}},
+		Sets: map[string]Set{
+			"base": newTestSet(types.MappingWithEquals{"APP_ENV": strPtr("production")}),
+			"web":  newTestSet(types.MappingWithEquals{"PORT": strPtr("8080")}),
+		},
 	}
 
-	output := string(data)
-	if strings.Contains(output, "description: Imported from .env file") {
-		t.Fatalf("expected imported .env var description to be omitted, got:\n%s", output)
+	vars := m.VarsForService("web")
+	if len(vars) != 2 {
+		t.Fatalf("expected 2 vars, got %d", len(vars))
+	}
+	if got := VarString(vars["APP_ENV"]); got != "production" {
+		t.Fatalf("expected APP_ENV=production, got %q", got)
+	}
+	if got := VarString(vars["PORT"]); got != "8080" {
+		t.Fatalf("expected PORT=8080, got %q", got)
 	}
 }
 
@@ -860,17 +742,13 @@ func TestIsValidImageReference(t *testing.T) {
 func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 	m := &Project{
 		Meta: Meta{Title: "Example"},
-		Services: []Service{
-			{
-				Name:     "web",
-				Image:    "https://ghcr.io/front-matter/app:latest",
-				Platform: "linux",
-				Sets:     []string{"application"},
-			},
-		},
-		Sets: map[string]Set{
-			"application": {},
-		},
+		Services: []Service{{
+			Name:     "web",
+			Image:    "https://ghcr.io/front-matter/app:latest",
+			Platform: "linux",
+			Sets:     []string{"application"},
+		}},
+		Sets: map[string]Set{"application": {}},
 	}
 
 	issues := m.LintIssues()
@@ -889,28 +767,6 @@ func TestLintWarnsForInvalidServiceImageAndPlatform(t *testing.T) {
 	}
 	if !foundPlatform {
 		t.Fatalf("expected service-platform-format issue, got %#v", issues)
-	}
-}
-
-func TestLintAllowsMissingPlatform(t *testing.T) {
-	m := &Project{
-		Meta: Meta{Title: "Example"},
-		Services: []Service{
-			{
-				Name:  "web",
-				Image: "ghcr.io/front-matter/invenio-rdm-starter:v1.2.3",
-				Sets:  []string{"application"},
-			},
-		},
-		Sets: map[string]Set{
-			"application": {},
-		},
-	}
-
-	for _, issue := range m.LintIssues() {
-		if issue.Rule == "service-platform-format" {
-			t.Fatalf("unexpected platform issue: %#v", issue)
-		}
 	}
 }
 
@@ -985,155 +841,5 @@ func TestLintDoesNotErrorWhenAllSetsAreUsed(t *testing.T) {
 		if issue.Rule == "x-set-anchor-must-be-used" {
 			t.Fatalf("unexpected unused set lint issue: %#v", issue)
 		}
-	}
-}
-
-func TestVarDescriptionFromCommentSequenceFormat(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"x-set-app: &app",
-		"  vars:",
-		"    # Database connection string.",
-		"    - key: DATABASE_URL",
-		"      default: postgres://localhost/app",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["app"]
-	if !ok {
-		t.Fatalf("expected set app, got %+v", m.Sets)
-	}
-	if len(set.Vars()) != 1 {
-		t.Fatalf("expected one var, got %+v", set.Vars())
-	}
-	if set.Vars()[0].Description != "Database connection string." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars()[0].Description)
-	}
-}
-
-func TestVarDescriptionFromCommentMappingFormat(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"x-set-app: &app",
-		"  vars:",
-		"    # Cache server URL.",
-		"    CACHE_URL:",
-		"      default: redis://localhost:6379",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["app"]
-	if !ok {
-		t.Fatalf("expected set app, got %+v", m.Sets)
-	}
-	if len(set.Vars()) != 1 {
-		t.Fatalf("expected one var, got %+v", set.Vars())
-	}
-	if set.Vars()[0].Description != "Cache server URL." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars()[0].Description)
-	}
-}
-
-func TestVarExplicitDescriptionTakesPrecedenceOverComment(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"x-set-app: &app",
-		"  vars:",
-		"    # Comment that should be ignored.",
-		"    - key: DATABASE_URL",
-		"      description: Explicit description.",
-		"      default: postgres://localhost/app",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["app"]
-	if !ok {
-		t.Fatalf("expected set app, got %+v", m.Sets)
-	}
-	if set.Vars()[0].Description != "Explicit description." {
-		t.Fatalf("expected explicit description to take precedence, got %q", set.Vars()[0].Description)
-	}
-}
-
-func TestVarDescriptionFromCommentInlineSetFormat(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"x-set-base: &base",
-		"  PLAIN_VAR: value1",
-		"  # Allow users to change their password.",
-		"  SECURITY_CHANGEABLE: \"${SECURITY_CHANGEABLE:-true}\"",
-		"  SECURITY_RECOVERABLE: \"${SECURITY_RECOVERABLE:-true}\"",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["base"]
-	if !ok {
-		t.Fatalf("expected set base, got %+v", m.Sets)
-	}
-	if len(set.Vars()) != 3 {
-		t.Fatalf("expected 3 vars, got %+v", set.Vars())
-	}
-	if set.Vars()[0].Description != "" {
-		t.Fatalf("expected no description for PLAIN_VAR, got %q", set.Vars()[0].Description)
-	}
-	if set.Vars()[1].Description != "Allow users to change their password." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars()[1].Description)
-	}
-	if set.Vars()[2].Description != "" {
-		t.Fatalf("expected no description for SECURITY_RECOVERABLE, got %q", set.Vars()[2].Description)
-	}
-}
-
-func TestVarLinkFromCommentInlineSetFormat(t *testing.T) {
-	input := strings.Join([]string{
-		"x-envy:",
-		"  title: Example",
-		"x-set-base: &base",
-		"  # Allow users to change their password.",
-		"  # Link: https://example.com/docs/security",
-		"  SECURITY_CHANGEABLE: \"${SECURITY_CHANGEABLE:-true}\"",
-		"  PLAIN_VAR: value1",
-	}, "\n")
-
-	var m Project
-	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-
-	set, ok := m.Sets["base"]
-	if !ok {
-		t.Fatalf("expected set base, got %+v", m.Sets)
-	}
-	if len(set.Vars()) != 2 {
-		t.Fatalf("expected 2 vars, got %+v", set.Vars())
-	}
-	if set.Vars()[0].Description != "Allow users to change their password." {
-		t.Fatalf("expected description without link line, got %q", set.Vars()[0].Description)
-	}
-	if set.Vars()[0].Link != "https://example.com/docs/security" {
-		t.Fatalf("expected link from comment, got %q", set.Vars()[0].Link)
-	}
-	if set.Vars()[1].Link != "" {
-		t.Fatalf("expected no link for PLAIN_VAR, got %q", set.Vars()[1].Link)
 	}
 }

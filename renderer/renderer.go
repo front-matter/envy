@@ -39,15 +39,16 @@ func renderMarkdown(m *compose.Project) string {
 		sb.WriteString("| Variable | Default | Description |\n")
 		sb.WriteString("|---|---|---|\n")
 
-		for _, v := range set.Vars() {
+		vars := set.Vars()
+		for _, key := range compose.SortedVarKeys(vars) {
 			defaultVal := "—"
-			if v.DefaultString() != "" {
-				defaultVal = fmt.Sprintf("`%s`", v.DefaultString())
+			if compose.VarString(vars[key]) != "" {
+				defaultVal = fmt.Sprintf("`%s`", compose.VarString(vars[key]))
 			}
-			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
+			desc := ""
 			sb.WriteString(fmt.Sprintf(
 				"| `%s` | %s | %s |\n",
-				v.Key, defaultVal, desc,
+				key, defaultVal, desc,
 			))
 		}
 		sb.WriteString("\n")
@@ -70,14 +71,15 @@ func renderRST(m *compose.Project) string {
 		sb.WriteString(strings.Repeat("-", len(set.Key())) + "\n\n")
 		sb.WriteString(set.Description() + "\n\n")
 
-		for _, v := range set.Vars() {
-			sb.WriteString(fmt.Sprintf(".. envvar:: %s\n\n", v.Key))
-			desc := strings.TrimSpace(v.Description)
+		vars := set.Vars()
+		for _, key := range compose.SortedVarKeys(vars) {
+			sb.WriteString(fmt.Sprintf(".. envvar:: %s\n\n", key))
+			desc := ""
 			for _, line := range strings.Split(desc, "\n") {
 				sb.WriteString(fmt.Sprintf("   %s\n", line))
 			}
-			if v.DefaultString() != "" {
-				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", v.DefaultString()))
+			if compose.VarString(vars[key]) != "" {
+				sb.WriteString(fmt.Sprintf("\n   **Default:** ``%s``\n", compose.VarString(vars[key])))
 			}
 			sb.WriteString("\n")
 		}
@@ -96,18 +98,19 @@ func renderTable(m *compose.Project) string {
 
 	for _, set := range m.OrderedSets() {
 		sb.WriteString(fmt.Sprintf("\n# %s\n", set.Key()))
-		for _, v := range set.Vars() {
-			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
+		vars := set.Vars()
+		for _, key := range compose.SortedVarKeys(vars) {
+			desc := ""
 			if len(desc) > 60 {
 				desc = desc[:57] + "..."
 			}
-			defaultVal := v.DefaultString()
+			defaultVal := compose.VarString(vars[key])
 			if len(defaultVal) > 38 {
 				defaultVal = defaultVal[:35] + "..."
 			}
 			sb.WriteString(fmt.Sprintf(
 				"%-60s %-40s %s\n",
-				v.Key, defaultVal, desc,
+				key, defaultVal, desc,
 			))
 		}
 	}

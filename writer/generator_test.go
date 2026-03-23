@@ -4,10 +4,12 @@ import (
 	"strings"
 	"testing"
 
+	types "github.com/compose-spec/compose-go/v2/types"
+
 	"github.com/front-matter/envy/compose"
 )
 
-func newWriterTestSet(vars []compose.Var) compose.Set {
+func newWriterTestSet(vars types.MappingWithEquals) compose.Set {
 	set := compose.NewSet()
 	set.SetVars(vars)
 	return set
@@ -17,7 +19,7 @@ func TestGenerateRendersVariableDescriptions(t *testing.T) {
 	m := &compose.Project{
 		Meta: compose.Meta{Title: "Example"},
 		Sets: map[string]compose.Set{
-			"app": newWriterTestSet([]compose.Var{{Key: "REQ", Default: "x", Description: "first var"}, {Key: "OPT", Default: "y", Description: "optional var"}}),
+			"app": newWriterTestSet(types.MappingWithEquals{"REQ": strPtr("x"), "OPT": strPtr("y")}),
 		},
 	}
 
@@ -26,11 +28,11 @@ func TestGenerateRendersVariableDescriptions(t *testing.T) {
 	if strings.Contains(output, "[REQUIRED]") {
 		t.Fatalf("did not expect required marker, got:\n%s", output)
 	}
-	if !strings.Contains(output, "# first var") {
-		t.Fatalf("expected first variable comment, got:\n%s", output)
+	if !strings.Contains(output, "REQ=x") {
+		t.Fatalf("expected first variable output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "# optional var") {
-		t.Fatalf("expected optional variable comment without marker, got:\n%s", output)
+	if !strings.Contains(output, "OPT=y") {
+		t.Fatalf("expected second variable output, got:\n%s", output)
 	}
 }
 
@@ -38,7 +40,7 @@ func TestGenerateIncludesAllVars(t *testing.T) {
 	m := &compose.Project{
 		Meta: compose.Meta{Title: "Example"},
 		Sets: map[string]compose.Set{
-			"app": newWriterTestSet([]compose.Var{{Key: "EDITABLE_VAR", Default: "x", Description: "included"}, {Key: "SECOND_VAR", Default: "y", Description: "excluded"}}),
+			"app": newWriterTestSet(types.MappingWithEquals{"EDITABLE_VAR": strPtr("x"), "SECOND_VAR": strPtr("y")}),
 		},
 	}
 
@@ -50,4 +52,9 @@ func TestGenerateIncludesAllVars(t *testing.T) {
 	if !strings.Contains(output, "SECOND_VAR=y") {
 		t.Fatalf("expected second variable in output, got:\n%s", output)
 	}
+}
+
+func strPtr(value string) *string {
+	v := value
+	return &v
 }

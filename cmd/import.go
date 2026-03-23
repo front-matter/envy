@@ -241,8 +241,8 @@ func verifyServiceCommandVarsDefined(m *compose.Project) []string {
 	}
 
 	allVars := make(map[string]struct{})
-	for _, v := range m.AllVars() {
-		allVars[v.Key] = struct{}{}
+	for key := range m.AllVars() {
+		allVars[key] = struct{}{}
 	}
 
 	var issues []string

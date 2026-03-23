@@ -44,8 +44,8 @@ Examples:
 		}
 
 		manifestKeys := make(map[string]bool)
-		for _, v := range m.AllVars() {
-			manifestKeys[v.Key] = true
+		for key := range m.AllVars() {
+			manifestKeys[key] = true
 		}
 
 		envKeys := make(map[string]bool)

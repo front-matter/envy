@@ -2,7 +2,8 @@ package reader
 
 import (
 	"fmt"
-	"sort"
+
+	types "github.com/compose-spec/compose-go/v2/types"
 
 	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
@@ -20,19 +21,17 @@ func ImportEnvFile(path string) (*compose.Project, error) {
 	}
 
 	// All .env variables go into a single "env" set.
-	vars := make([]compose.Var, 0, len(env.Keys))
+	vars := types.MappingWithEquals{}
 
 	for _, key := range env.Keys {
-		vars = append(vars, compose.Var{
-			Key:         key,
-			Default:     env.Values[key],
-			Description: "Imported from .env file",
-		})
+		value := env.Values[key]
+		vars[key] = &value
 	}
 
-	sort.Slice(vars, func(i, j int) bool {
-		return vars[i].Key < vars[j].Key
-	})
+	sortedVars := types.MappingWithEquals{}
+	for _, key := range env.Keys {
+		sortedVars[key] = vars[key]
+	}
 
 	m := &compose.Project{
 		Meta: compose.Meta{
@@ -46,7 +45,7 @@ func ImportEnvFile(path string) (*compose.Project, error) {
 
 	set := compose.NewSet()
 	set.SetDescription("Imported from .env file")
-	set.SetVars(vars)
+	set.SetVars(sortedVars)
 	m.Sets["env"] = set
 
 	return m, nil

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/front-matter/envy/compose"
 	"github.com/front-matter/envy/envfile"
 )
 
@@ -84,9 +85,9 @@ EMPTY_VALUE=
 	}
 
 	set := m.Sets["env"]
-	for _, v := range set.Vars() {
-		if got := v.Default; got != mappableEnvValue(v.Key) {
-			t.Errorf("%s: expected default %q, got %q", v.Key, mappableEnvValue(v.Key), got)
+	for key, value := range set.Vars() {
+		if got := compose.VarString(value); got != mappableEnvValue(key) {
+			t.Errorf("%s: expected default %q, got %q", key, mappableEnvValue(key), got)
 		}
 	}
 }
@@ -137,8 +138,8 @@ func TestImportEnvFileEnvLocal(t *testing.T) {
 		t.Errorf("expected 1 variable, got %d", len(set.Vars()))
 	}
 
-	if set.Vars()[0].Key != "LOCAL_VAR" {
-		t.Errorf("expected variable LOCAL_VAR, got %s", set.Vars()[0].Key)
+	if _, ok := set.Vars()["LOCAL_VAR"]; !ok {
+		t.Errorf("expected variable LOCAL_VAR to exist")
 	}
 }
 
@@ -166,9 +167,10 @@ BANANA=b
 
 	// Verify variables are sorted
 	expected := []string{"APPLE", "BANANA", "MONKEY", "ZEBRA"}
-	for i, v := range set.Vars() {
-		if v.Key != expected[i] {
-			t.Errorf("variable %d: expected %s, got %s", i, expected[i], v.Key)
+	keys := compose.SortedVarKeys(set.Vars())
+	for i, key := range keys {
+		if key != expected[i] {
+			t.Errorf("variable %d: expected %s, got %s", i, expected[i], key)
 		}
 	}
 }

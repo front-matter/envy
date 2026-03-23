@@ -29,6 +29,71 @@ type Project struct {
 	Sets     map[string]Set `yaml:"-"`
 }
 
+// AnnotatedEnv is a helper type to decode environment variables with comments.
+type AnnotatedEnv struct {
+	Mapping  types.MappingWithEquals
+	Comments map[string]string // key → comment text
+}
+
+// UnmarshalYAML decodes environment variables from a YAML sequence while capturing comments.
+func (a *AnnotatedEnv) UnmarshalYAML(value *yaml.Node) error {
+	a.Comments = make(map[string]string)
+
+	// value is a sequence node (environment is a list)
+	if value.Kind != yaml.SequenceNode {
+		return fmt.Errorf("expected sequence, got %v", value.Kind)
+	}
+
+	var raw []string
+	for _, item := range value.Content {
+		// item.Value is the string e.g. "PORT=8080"
+		// item.LineComment is "# my comment" (with the # included)
+		raw = append(raw, item.Value)
+
+		if item.LineComment != "" {
+			key := extractKey(item.Value)
+			a.Comments[key] = strings.TrimPrefix(
+				strings.TrimSpace(item.LineComment), "# ",
+			)
+		}
+		if item.HeadComment != "" {
+			key := extractKey(item.Value)
+			a.Comments[key+"_head"] = strings.TrimPrefix(
+				strings.TrimSpace(item.HeadComment), "# ",
+			)
+		}
+	}
+
+	a.Mapping = types.NewMappingWithEquals(raw)
+	return nil
+}
+
+// extractKey extracts the variable name from a "KEY=VALUE" string, returning "KEY".
+func extractKey(pair string) string {
+	k, _, _ := strings.Cut(pair, "=")
+	return k
+}
+
+// ServiceConfigWithComments extends compose-go's ServiceConfig
+// to include environment variables with comments.
+type ServiceConfigWithComments struct {
+	types.ServiceConfig `yaml:",inline"`
+	Environment         AnnotatedEnv `yaml:"environment"`
+}
+
+type ComposeFileWithComments struct {
+	Services map[string]ServiceConfigWithComments `yaml:"services"`
+}
+
+// ParseWithComments parses a compose YAML file while preserving comments on environment variables.
+func ParseWithComments(data []byte) (*ComposeFileWithComments, error) {
+	var out ComposeFileWithComments
+	if err := yaml.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Meta holds envy-specific metadata.
 type Meta struct {
 	Title                    string   `yaml:"title,omitempty"`
@@ -89,26 +154,14 @@ func setVarsStorageKey() string {
 	return setInternalPrefix + "vars"
 }
 
-// Var defines a single environment variable
-type Var struct {
-	Key         string `yaml:"key"`
-	Description string `yaml:"description,omitempty"`
-	Link        string `yaml:"-"`
-	Default     string `yaml:"default,omitempty"`
-}
-
-type setVarPayload struct {
-	Key         string `yaml:"key"`
-	Description string `yaml:"description,omitempty"`
-	Link        string `yaml:"link,omitempty"`
-	Default     string `yaml:"default,omitempty"`
-}
+// Var aligns with compose-go's MappingWithEquals value type.
+type Var *string
 
 // SetVars holds vars for a single set.
 type SetVars struct {
 	SetKey      string
 	Description string
-	Vars        []Var
+	Vars        types.MappingWithEquals
 }
 
 // LintIssue represents one lint finding.
@@ -512,10 +565,6 @@ func (m *Project) OrderedSets() []Set {
 	return sets
 }
 
-func (v Var) DefaultString() string {
-	return v.Default
-}
-
 func NewSet() Set {
 	return Set{}
 }
@@ -552,97 +601,60 @@ func (s *Set) delete(key string) {
 func (s Set) Key() string         { return s.get(setMetadataKey("key")) }
 func (s Set) Description() string { return s.get(setMetadataKey("description")) }
 func (s Set) Link() string        { return s.get(setMetadataKey("link")) }
-func (s Set) Vars() []Var {
-	payload := strings.TrimSpace(s.get(setVarsStorageKey()))
-	if payload == "" {
+func (s Set) Vars() types.MappingWithEquals {
+	m := types.MappingWithEquals(s)
+	if m == nil {
 		return nil
 	}
-	var stored []setVarPayload
-	if err := yaml.Unmarshal([]byte(payload), &stored); err != nil {
+
+	vars := types.MappingWithEquals{}
+	for key, value := range m {
+		if strings.HasPrefix(key, setInternalPrefix) {
+			continue
+		}
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if value == nil {
+			vars[key] = nil
+			continue
+		}
+		v := *value
+		vars[key] = &v
+	}
+
+	if len(vars) == 0 {
 		return nil
 	}
-	vars := make([]Var, 0, len(stored))
-	for _, variable := range stored {
-		vars = append(vars, Var{
-			Key:         variable.Key,
-			Description: variable.Description,
-			Link:        variable.Link,
-			Default:     variable.Default,
-		})
-	}
+
 	return vars
 }
 
 func (s *Set) SetKey(value string)         { s.set(setMetadataKey("key"), value) }
 func (s *Set) SetDescription(value string) { s.set(setMetadataKey("description"), value) }
 func (s *Set) SetLink(value string)        { s.set(setMetadataKey("link"), value) }
-func (s *Set) SetVars(vars []Var) {
-	normalized := make([]Var, 0, len(vars))
-	seen := make(map[string]struct{}, len(vars))
-	for _, variable := range vars {
-		key := strings.TrimSpace(variable.Key)
-		if key == "" {
+func (s *Set) SetVars(vars types.MappingWithEquals) {
+	m := s.ensureMap()
+	for key := range m {
+		if strings.HasPrefix(key, setInternalPrefix) {
 			continue
 		}
-		if _, exists := seen[key]; exists {
-			for index := range normalized {
-				if normalized[index].Key == key {
-					normalized[index] = variable
-					break
-				}
-			}
+		delete(m, key)
+	}
+
+	for key, value := range vars {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
 			continue
 		}
-		seen[key] = struct{}{}
-		variable.Key = key
-		normalized = append(normalized, variable)
+		if value == nil {
+			m[trimmedKey] = nil
+			continue
+		}
+		normalized := parseComposeDefaultSyntax(*value)
+		v := normalized
+		m[trimmedKey] = &v
 	}
-	if len(normalized) == 0 {
-		s.delete(setVarsStorageKey())
-		return
-	}
-	stored := make([]setVarPayload, 0, len(normalized))
-	for _, variable := range normalized {
-		stored = append(stored, setVarPayload{
-			Key:         variable.Key,
-			Description: variable.Description,
-			Link:        variable.Link,
-			Default:     variable.Default,
-		})
-	}
-	payload, err := yaml.Marshal(stored)
-	if err != nil {
-		s.delete(setVarsStorageKey())
-		return
-	}
-	s.set(setVarsStorageKey(), string(payload))
-}
-
-func (v *Var) UnmarshalYAML(node *yaml.Node) error {
-	type rawVar Var
-	var decoded rawVar
-	if err := node.Decode(&decoded); err != nil {
-		return err
-	}
-
-	*v = Var(decoded)
-	return nil
-}
-
-// MarshalYAML omits import placeholder descriptions and emits defaults as strings.
-func (v Var) MarshalYAML() (interface{}, error) {
-	description := v.Description
-	if description == "Imported from compose environment" || description == "Imported from .env file" {
-		description = ""
-	}
-
-	node := &yaml.Node{Kind: yaml.MappingNode}
-	if description != "" {
-		appendMapping(node, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: description})
-	}
-	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.DefaultString()})
-
-	return node, nil
 }
 
 func encodeNode(value interface{}) (*yaml.Node, error) {
@@ -684,19 +696,12 @@ func encodeSetNode(set Set) (*yaml.Node, error) {
 		appendMapping(setNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Link()})
 	}
 	if len(set.Vars()) > 0 {
-		for _, v := range set.Vars() {
-			varNodeValue, err := v.MarshalYAML()
-			if err != nil {
-				return nil, err
+		for _, key := range sortedMappingKeys(set.Vars()) {
+			value := ""
+			if raw := set.Vars()[key]; raw != nil {
+				value = *raw
 			}
-			encoded, err := encodeNode(varNodeValue)
-			if err != nil {
-				return nil, err
-			}
-			if encoded.Kind != yaml.MappingNode {
-				return nil, fmt.Errorf("expected var mapping, got YAML kind %d", encoded.Kind)
-			}
-			appendMapping(setNode, v.Key, encoded)
+			appendMapping(setNode, key, &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: value})
 		}
 	}
 	return setNode, nil
@@ -882,47 +887,17 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 			}
 			out.SetVars(vars)
 		default:
-			comments := []string{
-				node.Content[i].HeadComment,
-				node.Content[i].LineComment,
-				node.Content[i+1].HeadComment,
-				node.Content[i+1].LineComment,
+			vars := out.Vars()
+			if vars == nil {
+				vars = types.MappingWithEquals{}
 			}
-			if i >= 2 {
-				comments = append([]string{node.Content[i-1].FootComment}, comments...)
-			}
-			commentDescription, commentLink := parseSetMetadataFromComments(comments...)
-
-			if value.Kind == yaml.ScalarNode {
-				var scalar string
-				if err := value.Decode(&scalar); err != nil {
-					return out, err
-				}
-				v := Var{Key: key, Default: scalar}
-				v = normalizeVarComposeSyntax(v)
-				if strings.TrimSpace(v.Description) == "" {
-					v.Description = commentDescription
-				}
-				if strings.TrimSpace(v.Link) == "" {
-					v.Link = commentLink
-				}
-				out.SetVars(append(out.Vars(), v))
-				continue
-			}
-
-			var v Var
-			if err := value.Decode(&v); err != nil {
+			defaultValue, err := decodeVarDefault(value)
+			if err != nil {
 				return out, err
 			}
-			v.Key = key
-			v = normalizeVarComposeSyntax(v)
-			if strings.TrimSpace(v.Description) == "" {
-				v.Description = commentDescription
-			}
-			if strings.TrimSpace(v.Link) == "" {
-				v.Link = commentLink
-			}
-			out.SetVars(append(out.Vars(), v))
+			v := defaultValue
+			vars[key] = &v
+			out.SetVars(vars)
 		}
 	}
 	return out, nil
@@ -1097,61 +1072,33 @@ func decodeServiceEnvironmentSetRefs(node *yaml.Node) ([]string, error) {
 	return sets, nil
 }
 
-func decodeVarsNode(node *yaml.Node) ([]Var, error) {
+func decodeVarsNode(node *yaml.Node) (types.MappingWithEquals, error) {
 	switch node.Kind {
 	case yaml.SequenceNode:
-		vars := make([]Var, 0, len(node.Content))
-		for j, item := range node.Content {
-			var v Var
-			if err := item.Decode(&v); err != nil {
+		vars := types.MappingWithEquals{}
+		for _, item := range node.Content {
+			var decoded map[string]string
+			if err := item.Decode(&decoded); err != nil {
 				return nil, err
 			}
-			v = normalizeVarComposeSyntax(v)
-			if strings.TrimSpace(v.Description) == "" || strings.TrimSpace(v.Link) == "" {
-				comments := []string{item.HeadComment, item.LineComment}
-				if j >= 1 {
-					comments = append([]string{node.Content[j-1].FootComment}, comments...)
-				}
-				commentDescription, commentLink := parseSetMetadataFromComments(comments...)
-				if strings.TrimSpace(v.Description) == "" {
-					v.Description = commentDescription
-				}
-				if strings.TrimSpace(v.Link) == "" {
-					v.Link = commentLink
-				}
+			key := strings.TrimSpace(decoded["key"])
+			if key == "" {
+				continue
 			}
-			vars = append(vars, v)
+			v := parseComposeDefaultSyntax(decoded["default"])
+			vars[key] = &v
 		}
 		return vars, nil
 	case yaml.MappingNode:
-		vars := make([]Var, 0, len(node.Content)/2)
+		vars := types.MappingWithEquals{}
 		for i := 0; i < len(node.Content); i += 2 {
 			key := node.Content[i].Value
-			var v Var
-			if err := node.Content[i+1].Decode(&v); err != nil {
+			defaultValue, err := decodeVarDefault(node.Content[i+1])
+			if err != nil {
 				return nil, err
 			}
-			v.Key = key
-			v = normalizeVarComposeSyntax(v)
-			if strings.TrimSpace(v.Description) == "" || strings.TrimSpace(v.Link) == "" {
-				comments := []string{
-					node.Content[i].HeadComment,
-					node.Content[i].LineComment,
-					node.Content[i+1].HeadComment,
-					node.Content[i+1].LineComment,
-				}
-				if i >= 2 {
-					comments = append([]string{node.Content[i-1].FootComment}, comments...)
-				}
-				commentDescription, commentLink := parseSetMetadataFromComments(comments...)
-				if strings.TrimSpace(v.Description) == "" {
-					v.Description = commentDescription
-				}
-				if strings.TrimSpace(v.Link) == "" {
-					v.Link = commentLink
-				}
-			}
-			vars = append(vars, v)
+			v := defaultValue
+			vars[key] = &v
 		}
 		return vars, nil
 	default:
@@ -1159,9 +1106,55 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 	}
 }
 
-func normalizeVarComposeSyntax(v Var) Var {
-	v.Default = parseComposeDefaultSyntax(v.Default)
-	return v
+func decodeVarDefault(node *yaml.Node) (string, error) {
+	if node.Kind == yaml.ScalarNode {
+		var scalar string
+		if err := node.Decode(&scalar); err != nil {
+			return "", err
+		}
+		return parseComposeDefaultSyntax(scalar), nil
+	}
+
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i < len(node.Content); i += 2 {
+			if node.Content[i].Value != "default" {
+				continue
+			}
+			var scalar string
+			if err := node.Content[i+1].Decode(&scalar); err != nil {
+				return "", err
+			}
+			return parseComposeDefaultSyntax(scalar), nil
+		}
+		return "", nil
+	}
+
+	return "", fmt.Errorf("expected var default scalar or mapping, got YAML kind %d", node.Kind)
+}
+
+func sortedMappingKeys(values types.MappingWithEquals) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// SortedVarKeys returns stable sorted keys for map-based vars.
+func SortedVarKeys(vars types.MappingWithEquals) []string {
+	return sortedMappingKeys(vars)
+}
+
+// VarString returns the dereferenced value or an empty string.
+func VarString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }
 
 func parseComposeDefaultSyntax(value string) string {
@@ -1212,11 +1205,21 @@ func decodeNamedEntriesNode(node *yaml.Node) ([]string, error) {
 	}
 }
 
-// AllVars returns a flat slice of all variables across all sets.
-func (m *Project) AllVars() []Var {
-	var vars []Var
+// AllVars returns merged vars across all sets.
+func (m *Project) AllVars() types.MappingWithEquals {
+	vars := types.MappingWithEquals{}
 	for _, set := range m.OrderedSets() {
-		vars = append(vars, set.Vars()...)
+		for key, value := range set.Vars() {
+			if value == nil {
+				vars[key] = nil
+				continue
+			}
+			v := *value
+			vars[key] = &v
+		}
+	}
+	if len(vars) == 0 {
+		return nil
 	}
 	return vars
 }
@@ -1262,7 +1265,7 @@ func (m *Project) VarsForServiceBySet(serviceName string) []SetVars {
 }
 
 // VarsForService returns vars for one service, or all vars if service is unknown.
-func (m *Project) VarsForService(serviceName string) []Var {
+func (m *Project) VarsForService(serviceName string) types.MappingWithEquals {
 	name := strings.TrimSpace(serviceName)
 	if name == "" {
 		return m.AllVars()
@@ -1273,13 +1276,23 @@ func (m *Project) VarsForService(serviceName string) []Var {
 			continue
 		}
 
-		var vars []Var
+		vars := types.MappingWithEquals{}
 		for _, setKey := range svc.Sets {
 			set, ok := m.Sets[setKey]
 			if !ok {
 				continue
 			}
-			vars = append(vars, set.Vars()...)
+			for key, value := range set.Vars() {
+				if value == nil {
+					vars[key] = nil
+					continue
+				}
+				v := *value
+				vars[key] = &v
+			}
+		}
+		if len(vars) == 0 {
+			return nil
 		}
 		return vars
 	}

@@ -7,10 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	types "github.com/compose-spec/compose-go/v2/types"
+
 	"github.com/front-matter/envy/compose"
 )
 
-func newImportTestSet(vars []compose.Var) compose.Set {
+func newImportTestSet(vars types.MappingWithEquals) compose.Set {
 	set := compose.NewSet()
 	set.SetVars(vars)
 	return set
@@ -203,7 +205,7 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]compose.Set{
-			"worker": newImportTestSet([]compose.Var{{Key: "BROKER_URL"}}),
+			"worker": newImportTestSet(types.MappingWithEquals{"BROKER_URL": nil}),
 		},
 	}
 
@@ -220,7 +222,7 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]compose.Set{
-			"worker": newImportTestSet([]compose.Var{{Key: "OTHER_VAR"}}),
+			"worker": newImportTestSet(types.MappingWithEquals{"OTHER_VAR": nil}),
 		},
 	}
 

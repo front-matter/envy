@@ -23,11 +23,10 @@ func Generate(m *compose.Project) string {
 		sb.WriteString(fmt.Sprintf("# ── %s %s\n", set.Key(), dashes))
 		sb.WriteString(fmt.Sprintf("# %s\n", set.Description()))
 
-		for _, v := range set.Vars() {
-			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
-			sb.WriteString(fmt.Sprintf("# %s\n", desc))
-
-			sb.WriteString(fmt.Sprintf("%s=%s\n", v.Key, v.DefaultString()))
+		vars := set.Vars()
+		for _, key := range compose.SortedVarKeys(vars) {
+			sb.WriteString("#\n")
+			sb.WriteString(fmt.Sprintf("%s=%s\n", key, compose.VarString(vars[key])))
 		}
 		sb.WriteString("\n")
 	}

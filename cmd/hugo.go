@@ -2258,12 +2258,12 @@ func parseBoolString(raw string) (bool, bool) {
 	}
 }
 
-func hugoConfigValue(metaValue string, lookup map[string]compose.Var, key string) string {
+func hugoConfigValue(metaValue string, lookup map[string]*string, key string) string {
 	if trimmed := strings.TrimSpace(metaValue); trimmed != "" {
 		return trimmed
 	}
 	if v, ok := lookup[key]; ok {
-		return strings.TrimSpace(v.DefaultString())
+		return strings.TrimSpace(compose.VarString(v))
 	}
 	return ""
 }
@@ -2413,10 +2413,10 @@ func localizedLanguagesConfig(languages map[string]interface{}, repoURL, title s
 	return localized
 }
 
-func buildVarLookup(m *compose.Project) map[string]compose.Var {
-	lookup := make(map[string]compose.Var)
-	for _, v := range m.AllVars() {
-		lookup[v.Key] = v
+func buildVarLookup(m *compose.Project) map[string]*string {
+	lookup := make(map[string]*string)
+	for key, value := range m.AllVars() {
+		lookup[key] = value
 	}
 	return lookup
 }
@@ -2990,7 +2990,8 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 		body.WriteString(renderInfoCallout(generatedPageString(language, "setNoVariables")))
 		return body.String()
 	}
-	for _, variable := range set.Vars() {
+	for _, key := range compose.SortedVarKeys(set.Vars()) {
+		variable := hugoVar{Key: key, Value: set.Vars()[key]}
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
 		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), true, language))
@@ -3308,14 +3309,26 @@ func profileWeight(m *compose.Project, profileName string) int {
 	return 999
 }
 
-func varsForServiceSorted(m *compose.Project, service compose.Service) []compose.Var {
-	vars := make([]compose.Var, 0)
+type hugoVar struct {
+	Key   string
+	Value *string
+}
+
+func varsForServiceSorted(m *compose.Project, service compose.Service) []hugoVar {
+	byKey := make(map[string]*string)
 	for _, setKey := range service.Sets {
 		set, ok := m.Sets[setKey]
 		if !ok {
 			continue
 		}
-		vars = append(vars, set.Vars()...)
+		for key, value := range set.Vars() {
+			byKey[key] = value
+		}
+	}
+
+	vars := make([]hugoVar, 0, len(byKey))
+	for key, value := range byKey {
+		vars = append(vars, hugoVar{Key: key, Value: value})
 	}
 
 	sort.SliceStable(vars, func(i, j int) bool {
@@ -3591,7 +3604,7 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
-func renderVarCard(variable compose.Var, description, class string, showQuestionPrefixAsRequired bool, language string) string {
+func renderVarCard(variable hugoVar, description, class string, showQuestionPrefixAsRequired bool, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card link=\"\" title=\"%s\" cardType=\"var\"",
 		escapeShortcodeValue(variable.Key),
@@ -3599,10 +3612,7 @@ func renderVarCard(variable compose.Var, description, class string, showQuestion
 	if strings.TrimSpace(description) != "" {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
-	if strings.TrimSpace(variable.Link) != "" {
-		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(strings.TrimSpace(variable.Link))))
-	}
-	defaultValue := strings.TrimSpace(variable.DefaultString())
+	defaultValue := strings.TrimSpace(compose.VarString(variable.Value))
 	hasQuestionPrefix := showQuestionPrefixAsRequired && strings.HasPrefix(defaultValue, "?")
 	if hasQuestionPrefix {
 		defaultValue = strings.TrimPrefix(defaultValue, "?")
@@ -3620,25 +3630,22 @@ func renderVarCard(variable compose.Var, description, class string, showQuestion
 	return sb.String()
 }
 
-func variableCardTag(variable compose.Var, language string) (string, string, string) {
+func variableCardTag(variable hugoVar, language string) (string, string, string) {
 	_ = variable
 	_ = language
 	return "", "", ""
 }
 
-func variableCardClass(variable compose.Var) string {
+func variableCardClass(variable hugoVar) string {
 	_ = variable
 	return ""
 }
 
-func variableCardSubtitle(variable compose.Var, language string) string {
+func variableCardSubtitle(variable hugoVar, language string) string {
 	parts := make([]string, 0, 5)
-	if strings.TrimSpace(variable.Description) != "" {
-		parts = append(parts, strings.TrimSpace(variable.Description))
-	}
 	_ = language
 
-	defaultValue := strings.TrimSpace(variable.DefaultString())
+	defaultValue := strings.TrimSpace(compose.VarString(variable.Value))
 	if len(parts) == 0 {
 		if defaultValue != "" {
 			return ""

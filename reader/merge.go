@@ -1,7 +1,7 @@
 package reader
 
 import (
-	"sort"
+	types "github.com/compose-spec/compose-go/v2/types"
 
 	"github.com/front-matter/envy/compose"
 )
@@ -55,16 +55,16 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 				otherKeys := make(map[string]bool)
 				for gk, g := range merged.Sets {
 					if gk != "env" {
-						for _, v := range g.Vars() {
-							otherKeys[v.Key] = true
+						for key := range g.Vars() {
+							otherKeys[key] = true
 						}
 					}
 				}
 				// Filter env vars to exclude those already in other sets.
-				var filteredVars []compose.Var
-				for _, v := range set.Vars() {
-					if !otherKeys[v.Key] {
-						filteredVars = append(filteredVars, v)
+				filteredVars := types.MappingWithEquals{}
+				for key, value := range set.Vars() {
+					if !otherKeys[key] {
+						filteredVars[key] = value
 					}
 				}
 				set.SetVars(filteredVars)
@@ -86,31 +86,26 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 	return merged
 }
 
-// mergeVars combines two variable lists, preferring the latter source for conflicts.
-// Returns a sorted list of merged variables.
-func mergeVars(base, overlay []compose.Var) []compose.Var {
-	// Create a map from base vars for quick lookup
-	varMap := make(map[string]compose.Var)
-	for _, v := range base {
-		varMap[v.Key] = v
+// mergeVars combines two var maps, preferring the latter source for conflicts.
+func mergeVars(base, overlay types.MappingWithEquals) types.MappingWithEquals {
+	varMap := types.MappingWithEquals{}
+	for key, value := range base {
+		if value == nil {
+			varMap[key] = nil
+			continue
+		}
+		v := *value
+		varMap[key] = &v
 	}
 
-	// Overlay with later vars
-	for _, v := range overlay {
-		varMap[v.Key] = v
+	for key, value := range overlay {
+		if value == nil {
+			varMap[key] = nil
+			continue
+		}
+		v := *value
+		varMap[key] = &v
 	}
 
-	// Sort by key and return as slice
-	keys := make([]string, 0, len(varMap))
-	for k := range varMap {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	result := make([]compose.Var, 0, len(varMap))
-	for _, k := range keys {
-		result = append(result, varMap[k])
-	}
-
-	return result
+	return varMap
 }
