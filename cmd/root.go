@@ -15,14 +15,13 @@ var rootCmd = &cobra.Command{
 	Short:         "Docker Compose manager",
 	SilenceErrors: true,
 	Long: `envy manages Docker Compose files. It validates and lints them,
-manages Compose profiles, audits secrets, generates and diffs .env files, and 
+	manages Compose profiles, generates and diffs .env files, and 
 produces documentation that can be deployed as a static website. Example usage:
 
 envy validate
 envy lint
 envy import
-envy secrets
-envy generate --no-secrets > .env.example
+	envy generate > .env.example
 envy diff .env.prod
 envy build --destination public
 envy server --bind 0.0.0.0

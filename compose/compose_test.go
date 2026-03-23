@@ -7,6 +7,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func newTestSet(vars []Var, configure ...func(*Set)) Set {
+	set := NewSet()
+	set.SetVars(vars)
+	for _, fn := range configure {
+		fn(&set)
+	}
+	return set
+}
+
 func TestStringDefaultUnmarshalYAML(t *testing.T) {
 	tests := []struct {
 		name string
@@ -55,28 +64,28 @@ func TestDecodeSetParsesComposeInterpolationSyntax(t *testing.T) {
 		t.Fatalf("expected application set")
 	}
 
-	byKey := make(map[string]Var, len(set.Vars))
-	for _, v := range set.Vars {
+	byKey := make(map[string]Var, len(set.Vars()))
+	for _, v := range set.Vars() {
 		byKey[v.Key] = v
 	}
 
 	login := byKey["INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED"]
-	if login.Default != "true" || login.IsRequired() || login.IsReadonly() {
+	if login.Default != "true" {
 		t.Fatalf("unexpected parsed login var: %+v", login)
 	}
 
 	siteName := byKey["INVENIO_RDM_SITE_NAME"]
-	if siteName.Default != "required" || !siteName.IsRequired() || siteName.IsReadonly() {
+	if siteName.Default != "required" {
 		t.Fatalf("unexpected parsed required var: %+v", siteName)
 	}
 
 	hostname := byKey["INVENIO_HOSTNAME"]
-	if hostname.Default != "" || !hostname.IsRequired() || hostname.IsReadonly() {
+	if hostname.Default != "" {
 		t.Fatalf("unexpected parsed bare interpolation var: %+v", hostname)
 	}
 
 	instancePath := byKey["INVENIO_INSTANCE_PATH"]
-	if instancePath.Default != "/opt/invenio/var/instance" || instancePath.IsRequired() || !instancePath.IsReadonly() {
+	if instancePath.Default != "/opt/invenio/var/instance" {
 		t.Fatalf("unexpected parsed literal var: %+v", instancePath)
 	}
 }
@@ -92,11 +101,7 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 			Image: "ghcr.io/example/web:latest",
 		}},
 		Sets: map[string]Set{
-			"web": {
-				Vars: []Var{{
-					Key: "APP_ENV",
-				}},
-			},
+			"web": newTestSet([]Var{{Key: "APP_ENV"}}),
 		},
 	}
 
@@ -113,7 +118,6 @@ func TestManifestMarshalOmitsEmptyFields(t *testing.T) {
 		"entrypoint: []",
 		"command: []",
 		"allowed: []",
-		"example: \"\"",
 	}
 
 	for _, check := range checks {
@@ -135,12 +139,8 @@ func TestManifestMarshalKeepsServicesWithoutAssociatedVars(t *testing.T) {
 			{Name: "cache", Sets: []string{"cache"}},
 		},
 		Sets: map[string]Set{
-			"web": {
-				Vars: []Var{{Key: "APP_ENV"}},
-			},
-			"cache": {
-				Vars: nil,
-			},
+			"web":   newTestSet([]Var{{Key: "APP_ENV"}}),
+			"cache": newTestSet(nil),
 		},
 	}
 
@@ -162,13 +162,11 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
 		Sets: map[string]Set{
-			"env": {
-				Vars: []Var{
-					{Key: "STRING_VALUE", Default: "production", Example: "demo-value", Required: "true", Secret: "true"},
-					{Key: "BOOL_TRUE", Default: "true"},
-					{Key: "BOOL_FALSE", Default: "false"},
-				},
-			},
+			"env": newTestSet([]Var{
+				{Key: "STRING_VALUE", Default: "production"},
+				{Key: "BOOL_TRUE", Default: "true"},
+				{Key: "BOOL_FALSE", Default: "false"},
+			}),
 		},
 	}
 
@@ -184,29 +182,11 @@ func TestManifestMarshalBoolLikeDefaultsAsStrings(t *testing.T) {
 	if !strings.Contains(output, "default: \"false\"") {
 		t.Fatalf("expected quoted string default false, got:\n%s", output)
 	}
-	if !strings.Contains(output, "default: \"\"") {
-		t.Fatalf("expected quoted empty default for secret var, got:\n%s", output)
-	}
-	if !strings.Contains(output, "example: \"demo-value\"") {
-		t.Fatalf("expected quoted string example value, got:\n%s", output)
-	}
-	if !strings.Contains(output, "required: \"true\"") {
-		t.Fatalf("expected quoted string required true, got:\n%s", output)
-	}
-	if !strings.Contains(output, "secret: \"true\"") {
-		t.Fatalf("expected quoted string secret true, got:\n%s", output)
-	}
 	if strings.Contains(output, "default: true\n") {
 		t.Fatalf("did not expect YAML boolean true, got:\n%s", output)
 	}
 	if strings.Contains(output, "default: false\n") {
 		t.Fatalf("did not expect YAML boolean false, got:\n%s", output)
-	}
-	if strings.Contains(output, "required: true\n") {
-		t.Fatalf("did not expect YAML boolean required true, got:\n%s", output)
-	}
-	if strings.Contains(output, "secret: true\n") {
-		t.Fatalf("did not expect YAML boolean secret true, got:\n%s", output)
 	}
 	if strings.Contains(output, "editable: true\n") {
 		t.Fatalf("did not expect YAML boolean editable true, got:\n%s", output)
@@ -226,7 +206,7 @@ func TestManifestMarshalServiceCommandAsFlowList(t *testing.T) {
 			Sets:    []string{"app"},
 		}},
 		Sets: map[string]Set{
-			"app": {Vars: []Var{{Key: "CELERY_BROKER_URL"}}},
+			"app": newTestSet([]Var{{Key: "CELERY_BROKER_URL"}}),
 		},
 	}
 
@@ -303,7 +283,6 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 		"  description: App settings",
 		"  APP_ENV:",
 		"    default: production",
-		"    required: true",
 		"services:",
 		"  web:",
 		"    image: ghcr.io/example/web:latest",
@@ -327,11 +306,11 @@ func TestManifestLoadServicesAndVars(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected application set")
 	}
-	if len(set.Vars) != 1 || set.Vars[0].Key != "APP_ENV" {
-		t.Fatalf("expected APP_ENV var, got %+v", set.Vars)
+	if len(set.Vars()) != 1 || set.Vars()[0].Key != "APP_ENV" {
+		t.Fatalf("expected APP_ENV var, got %+v", set.Vars())
 	}
-	if set.Vars[0].Default != "production" {
-		t.Fatalf("expected default production, got %q", set.Vars[0].Default)
+	if set.Vars()[0].Default != "production" {
+		t.Fatalf("expected default production, got %q", set.Vars()[0].Default)
 	}
 }
 
@@ -494,7 +473,7 @@ func TestManifestLoadServiceDescriptionFromCommentsWithMarkdownLink(t *testing.T
 	}
 }
 
-func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
+func TestManifestLoadIgnoresLegacySecretField(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",
 		"  title: Example",
@@ -511,23 +490,20 @@ func TestManifestLoadSecretDefaultIsAlwaysEmpty(t *testing.T) {
 	}
 
 	set, ok := m.Sets["app"]
-	if !ok || len(set.Vars) != 1 {
+	if !ok || len(set.Vars()) != 1 {
 		t.Fatalf("expected app set with one var, got %#v", m.Sets)
 	}
 
-	secret := set.Vars[0]
-	if !secret.IsSecret() {
-		t.Fatalf("expected var to be secret")
+	variable := set.Vars()[0]
+	if variable.Default != "super-secret" {
+		t.Fatalf("expected legacy secret field to be ignored and default preserved, got %q", variable.Default)
 	}
-	if secret.Default != "" {
-		t.Fatalf("expected secret default to be empty, got %q", secret.Default)
-	}
-	if secret.DefaultString() != "" {
-		t.Fatalf("expected secret DefaultString to be empty, got %q", secret.DefaultString())
+	if variable.DefaultString() != "super-secret" {
+		t.Fatalf("expected DefaultString to preserve default, got %q", variable.DefaultString())
 	}
 }
 
-func TestManifestLoadInlineSetVarWithEmptyInterpolationIsNotSecret(t *testing.T) {
+func TestManifestLoadInlineSetVarWithEmptyInterpolation(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",
 		"  title: Example",
@@ -541,23 +517,17 @@ func TestManifestLoadInlineSetVarWithEmptyInterpolationIsNotSecret(t *testing.T)
 	}
 
 	set := m.Sets["app"]
-	if len(set.Vars) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars)
+	if len(set.Vars()) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars())
 	}
 
-	variable := set.Vars[0]
-	if variable.IsSecret() {
-		t.Fatalf("expected interpolated empty default to remain non-secret")
-	}
+	variable := set.Vars()[0]
 	if variable.Default != "" {
 		t.Fatalf("expected empty default, got %q", variable.Default)
 	}
-	if variable.IsReadonly() {
-		t.Fatalf("expected interpolated var to remain editable")
-	}
 }
 
-func TestManifestLoadInlineSetVarWithBareEmptyValueIsSecret(t *testing.T) {
+func TestManifestLoadInlineSetVarWithBareEmptyValue(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",
 		"  title: Example",
@@ -571,23 +541,17 @@ func TestManifestLoadInlineSetVarWithBareEmptyValueIsSecret(t *testing.T) {
 	}
 
 	set := m.Sets["app"]
-	if len(set.Vars) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars)
+	if len(set.Vars()) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars())
 	}
 
-	variable := set.Vars[0]
-	if !variable.IsSecret() {
-		t.Fatalf("expected bare empty value to be secret")
-	}
+	variable := set.Vars()[0]
 	if variable.Default != "" {
-		t.Fatalf("expected secret default to stay empty, got %q", variable.Default)
-	}
-	if variable.DefaultString() != "" {
-		t.Fatalf("expected secret DefaultString to be empty, got %q", variable.DefaultString())
+		t.Fatalf("expected empty default to stay empty, got %q", variable.Default)
 	}
 }
 
-func TestManifestLoadInlineSetVarWithExplicitEmptyStringIsNotSecret(t *testing.T) {
+func TestManifestLoadInlineSetVarWithExplicitEmptyString(t *testing.T) {
 	input := strings.Join([]string{
 		"x-envy:",
 		"  title: Example",
@@ -601,19 +565,13 @@ func TestManifestLoadInlineSetVarWithExplicitEmptyStringIsNotSecret(t *testing.T
 	}
 
 	set := m.Sets["app"]
-	if len(set.Vars) != 1 {
-		t.Fatalf("expected one var, got %#v", set.Vars)
+	if len(set.Vars()) != 1 {
+		t.Fatalf("expected one var, got %#v", set.Vars())
 	}
 
-	variable := set.Vars[0]
-	if variable.IsSecret() {
-		t.Fatalf("expected explicitly empty string to remain non-secret")
-	}
+	variable := set.Vars()[0]
 	if variable.Default != "" {
 		t.Fatalf("expected empty default, got %q", variable.Default)
-	}
-	if variable.IsReadonly() {
-		t.Fatalf("expected explicitly empty string var to remain editable")
 	}
 }
 
@@ -637,8 +595,8 @@ func TestManifestLoadGroupLink(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected common set")
 	}
-	if set.Link != "https://example.org/common" {
-		t.Fatalf("expected set link to be preserved, got %q", set.Link)
+	if set.Link() != "https://example.org/common" {
+		t.Fatalf("expected set link to be preserved, got %q", set.Link())
 	}
 
 	data, err := yaml.Marshal(m)
@@ -670,11 +628,11 @@ func TestManifestLoadSetDescriptionAndLinkFromComments(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected base set")
 	}
-	if set.Description != "Shared environment variables for web and worker." {
-		t.Fatalf("expected set description from comment, got %q", set.Description)
+	if set.Description() != "Shared environment variables for web and worker." {
+		t.Fatalf("expected set description from comment, got %q", set.Description())
 	}
-	if set.Link != "https://example.org/base" {
-		t.Fatalf("expected set link from comment, got %q", set.Link)
+	if set.Link() != "https://example.org/base" {
+		t.Fatalf("expected set link from comment, got %q", set.Link())
 	}
 }
 
@@ -698,11 +656,11 @@ func TestManifestLoadSetLinkFromMarkdownComment(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected common set")
 	}
-	if set.Description != "Shared settings" {
-		t.Fatalf("expected set description from comment, got %q", set.Description)
+	if set.Description() != "Shared settings" {
+		t.Fatalf("expected set description from comment, got %q", set.Description())
 	}
-	if set.Link != "https://example.org/docs" {
-		t.Fatalf("expected markdown link extraction, got %q", set.Link)
+	if set.Link() != "https://example.org/docs" {
+		t.Fatalf("expected markdown link extraction, got %q", set.Link())
 	}
 }
 
@@ -726,11 +684,11 @@ func TestManifestLoadSetLinkFromMarkdownReferenceComment(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected base set")
 	}
-	if set.Description != "Shared settings" {
-		t.Fatalf("expected set description from comment, got %q", set.Description)
+	if set.Description() != "Shared settings" {
+		t.Fatalf("expected set description from comment, got %q", set.Description())
 	}
-	if set.Link != "https://example.org/base" {
-		t.Fatalf("expected markdown reference-style link extraction, got %q", set.Link)
+	if set.Link() != "https://example.org/base" {
+		t.Fatalf("expected markdown reference-style link extraction, got %q", set.Link())
 	}
 }
 
@@ -757,11 +715,11 @@ func TestManifestLoadSetDescriptionAndLinkFromInterEntryComments(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected worker set")
 	}
-	if set.Description != "Worker-only settings" {
-		t.Fatalf("expected set description from inter-entry comments, got %q", set.Description)
+	if set.Description() != "Worker-only settings" {
+		t.Fatalf("expected set description from inter-entry comments, got %q", set.Description())
 	}
-	if set.Link != "https://example.org/worker" {
-		t.Fatalf("expected set link from inter-entry comments, got %q", set.Link)
+	if set.Link() != "https://example.org/worker" {
+		t.Fatalf("expected set link from inter-entry comments, got %q", set.Link())
 	}
 }
 
@@ -784,11 +742,11 @@ func TestManifestLoadSetLinkFromInlineCommentURL(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected search set")
 	}
-	if set.Description != "Search settings. For details see https://example.org/search/docs." {
-		t.Fatalf("expected set description from inline URL comment, got %q", set.Description)
+	if set.Description() != "Search settings. For details see https://example.org/search/docs." {
+		t.Fatalf("expected set description from inline URL comment, got %q", set.Description())
 	}
-	if set.Link != "https://example.org/search/docs" {
-		t.Fatalf("expected set link extracted from inline URL comment, got %q", set.Link)
+	if set.Link() != "https://example.org/search/docs" {
+		t.Fatalf("expected set link extracted from inline URL comment, got %q", set.Link())
 	}
 }
 
@@ -812,12 +770,10 @@ func TestManifestMarshalOmitsImportedComposeVarDescription(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Compose Project", Version: "v1"},
 		Sets: map[string]Set{
-			"web": {
-				Vars: []Var{{
-					Key:         "APP_ENV",
-					Description: "Imported from compose environment",
-				}},
-			},
+			"web": newTestSet([]Var{{
+				Key:         "APP_ENV",
+				Description: "Imported from compose environment",
+			}}),
 		},
 	}
 
@@ -836,12 +792,10 @@ func TestManifestMarshalOmitsImportedEnvFileVarDescription(t *testing.T) {
 	m := Project{
 		Meta: Meta{Title: "Imported Env Project", Version: "v1"},
 		Sets: map[string]Set{
-			"env": {
-				Vars: []Var{{
-					Key:         "APP_ENV",
-					Description: "Imported from .env file",
-				}},
-			},
+			"env": newTestSet([]Var{{
+				Key:         "APP_ENV",
+				Description: "Imported from .env file",
+			}}),
 		},
 	}
 
@@ -1054,11 +1008,11 @@ func TestVarDescriptionFromCommentSequenceFormat(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected set app, got %+v", m.Sets)
 	}
-	if len(set.Vars) != 1 {
-		t.Fatalf("expected one var, got %+v", set.Vars)
+	if len(set.Vars()) != 1 {
+		t.Fatalf("expected one var, got %+v", set.Vars())
 	}
-	if set.Vars[0].Description != "Database connection string." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars[0].Description)
+	if set.Vars()[0].Description != "Database connection string." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars()[0].Description)
 	}
 }
 
@@ -1082,11 +1036,11 @@ func TestVarDescriptionFromCommentMappingFormat(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected set app, got %+v", m.Sets)
 	}
-	if len(set.Vars) != 1 {
-		t.Fatalf("expected one var, got %+v", set.Vars)
+	if len(set.Vars()) != 1 {
+		t.Fatalf("expected one var, got %+v", set.Vars())
 	}
-	if set.Vars[0].Description != "Cache server URL." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars[0].Description)
+	if set.Vars()[0].Description != "Cache server URL." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars()[0].Description)
 	}
 }
 
@@ -1111,8 +1065,8 @@ func TestVarExplicitDescriptionTakesPrecedenceOverComment(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected set app, got %+v", m.Sets)
 	}
-	if set.Vars[0].Description != "Explicit description." {
-		t.Fatalf("expected explicit description to take precedence, got %q", set.Vars[0].Description)
+	if set.Vars()[0].Description != "Explicit description." {
+		t.Fatalf("expected explicit description to take precedence, got %q", set.Vars()[0].Description)
 	}
 }
 
@@ -1136,17 +1090,17 @@ func TestVarDescriptionFromCommentInlineSetFormat(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected set base, got %+v", m.Sets)
 	}
-	if len(set.Vars) != 3 {
-		t.Fatalf("expected 3 vars, got %+v", set.Vars)
+	if len(set.Vars()) != 3 {
+		t.Fatalf("expected 3 vars, got %+v", set.Vars())
 	}
-	if set.Vars[0].Description != "" {
-		t.Fatalf("expected no description for PLAIN_VAR, got %q", set.Vars[0].Description)
+	if set.Vars()[0].Description != "" {
+		t.Fatalf("expected no description for PLAIN_VAR, got %q", set.Vars()[0].Description)
 	}
-	if set.Vars[1].Description != "Allow users to change their password." {
-		t.Fatalf("expected var description from comment, got %q", set.Vars[1].Description)
+	if set.Vars()[1].Description != "Allow users to change their password." {
+		t.Fatalf("expected var description from comment, got %q", set.Vars()[1].Description)
 	}
-	if set.Vars[2].Description != "" {
-		t.Fatalf("expected no description for SECURITY_RECOVERABLE, got %q", set.Vars[2].Description)
+	if set.Vars()[2].Description != "" {
+		t.Fatalf("expected no description for SECURITY_RECOVERABLE, got %q", set.Vars()[2].Description)
 	}
 }
 
@@ -1170,16 +1124,16 @@ func TestVarLinkFromCommentInlineSetFormat(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected set base, got %+v", m.Sets)
 	}
-	if len(set.Vars) != 2 {
-		t.Fatalf("expected 2 vars, got %+v", set.Vars)
+	if len(set.Vars()) != 2 {
+		t.Fatalf("expected 2 vars, got %+v", set.Vars())
 	}
-	if set.Vars[0].Description != "Allow users to change their password." {
-		t.Fatalf("expected description without link line, got %q", set.Vars[0].Description)
+	if set.Vars()[0].Description != "Allow users to change their password." {
+		t.Fatalf("expected description without link line, got %q", set.Vars()[0].Description)
 	}
-	if set.Vars[0].Link != "https://example.com/docs/security" {
-		t.Fatalf("expected link from comment, got %q", set.Vars[0].Link)
+	if set.Vars()[0].Link != "https://example.com/docs/security" {
+		t.Fatalf("expected link from comment, got %q", set.Vars()[0].Link)
 	}
-	if set.Vars[1].Link != "" {
-		t.Fatalf("expected no link for PLAIN_VAR, got %q", set.Vars[1].Link)
+	if set.Vars()[1].Link != "" {
+		t.Fatalf("expected no link for PLAIN_VAR, got %q", set.Vars()[1].Link)
 	}
 }

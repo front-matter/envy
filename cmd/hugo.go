@@ -2478,14 +2478,6 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "serviceNoVariables", "Dieser Dienst hat keine definierten Variablen.")
 		case "required":
 			return localizedString(language, "required", "Erforderlich")
-		case "defaultHidden":
-			return localizedString(language, "defaultHidden", "Standardwert verborgen")
-		case "example":
-			return localizedString(language, "example", "Beispiel")
-		case "secret":
-			return localizedString(language, "secret", "Geheim")
-		case "readonly":
-			return localizedString(language, "readonly", "Schreibgeschuetzt")
 		case "image":
 			return localizedString(language, "image", "Image")
 		case "platform":
@@ -2517,14 +2509,6 @@ func generatedPageString(language, key string) string {
 			return localizedString(language, "serviceNoVariables", "This service has no defined variables.")
 		case "required":
 			return localizedString(language, "required", "Required")
-		case "defaultHidden":
-			return localizedString(language, "defaultHidden", "Default hidden")
-		case "example":
-			return localizedString(language, "example", "Example")
-		case "secret":
-			return localizedString(language, "secret", "secret")
-		case "readonly":
-			return localizedString(language, "readonly", "readonly")
 		case "image":
 			return localizedString(language, "image", "Image")
 		case "platform":
@@ -2631,12 +2615,12 @@ func prepareBuildContentDirWithOptions(siteRoot string, m *compose.Project, refr
 	}
 
 	for _, set := range m.OrderedSets() {
-		pagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+".md")
+		pagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key())+".md")
 		if err := writeGeneratedFile(contentDir, pagePath, generateSetMarkdown(m, set, defaultLanguage)); err != nil {
 			return "", err
 		}
 		for _, language := range additionalLanguages {
-			localizedPagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key)+"."+language+".md")
+			localizedPagePath := filepath.Join(setsDir, sanitizeSetPageName(set.Key())+"."+language+".md")
 			if err := writeGeneratedFile(contentDir, localizedPagePath, generateSetMarkdown(m, set, language)); err != nil {
 				return "", err
 			}
@@ -2856,7 +2840,7 @@ func generateSetsIndexMarkdown(m *compose.Project, language string) string {
 	}))
 	body.WriteString(renderCardsOpen(2))
 	for _, set := range m.OrderedSets() {
-		services := servicesForSet(m, set.Key)
+		services := servicesForSet(m, set.Key())
 		body.WriteString(renderSetOverviewCard(set, services, language))
 	}
 	body.WriteString(renderAddSetForm())
@@ -2988,25 +2972,25 @@ func generateServiceMarkdown(m *compose.Project, service compose.Service, langua
 func generateSetMarkdown(m *compose.Project, set compose.Set, language string) string {
 	var body strings.Builder
 	body.WriteString(frontMatterMarkdown(map[string]interface{}{
-		"title":       set.Key,
-		"description": strings.TrimSpace(set.Description),
-		"weight":      setWeight(m, set.Key),
+		"title":       set.Key(),
+		"description": strings.TrimSpace(set.Description()),
+		"weight":      setWeight(m, set.Key()),
 		"hideTitle":   true,
 		"toc":         false,
 	}))
 
 	// Add set card at the top
-	services := servicesForSet(m, set.Key)
+	services := servicesForSet(m, set.Key())
 	body.WriteString(renderCardsOpen(1))
 	body.WriteString(renderSetCard(set, services, language))
 	body.WriteString(renderCardsClose())
 	body.WriteString("\n")
 
-	if len(set.Vars) == 0 {
+	if len(set.Vars()) == 0 {
 		body.WriteString(renderInfoCallout(generatedPageString(language, "setNoVariables")))
 		return body.String()
 	}
-	for _, variable := range set.Vars {
+	for _, variable := range set.Vars() {
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
 		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), true, language))
@@ -3296,7 +3280,7 @@ func sanitizeProfilePageName(profileName string) string {
 
 func setWeight(m *compose.Project, setKey string) int {
 	for index, set := range m.OrderedSets() {
-		if set.Key == setKey {
+		if set.Key() == setKey {
 			return index + 1
 		}
 	}
@@ -3331,7 +3315,7 @@ func varsForServiceSorted(m *compose.Project, service compose.Service) []compose
 		if !ok {
 			continue
 		}
-		vars = append(vars, set.Vars...)
+		vars = append(vars, set.Vars()...)
 	}
 
 	sort.SliceStable(vars, func(i, j int) bool {
@@ -3476,17 +3460,17 @@ func escapeShortcodeRawValue(value string) string {
 func renderSetCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" cardType=\"set\"",
-		escapeShortcodeValue(set.Key),
+		escapeShortcodeValue(set.Key()),
 	))
 
 	// Add description.
-	if strings.TrimSpace(set.Description) != "" {
-		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description))))
+	if strings.TrimSpace(set.Description()) != "" {
+		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(strings.TrimSpace(set.Description()))))
 	}
 
 	// Add documentation link.
-	if strings.TrimSpace(set.Link) != "" {
-		_, linkTarget := normalizeSetDocLink(set.Link)
+	if strings.TrimSpace(set.Link()) != "" {
+		_, linkTarget := normalizeSetDocLink(set.Link())
 		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(linkTarget)))
 	}
 
@@ -3501,17 +3485,17 @@ func renderSetCard(set compose.Set, services []string, language string) string {
 func renderSetOverviewCard(set compose.Set, services []string, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card title=\"%s\" titleLink=\"%s\" cardType=\"set\"",
-		escapeShortcodeValue(set.Key),
-		escapeShortcodeValue("/sets/"+sanitizeSetPageName(set.Key)+"/"),
+		escapeShortcodeValue(set.Key()),
+		escapeShortcodeValue("/sets/"+sanitizeSetPageName(set.Key())+"/"),
 	))
 
-	description := strings.TrimSpace(defaultString(set.Description, generatedPageString(language, "setDescriptionFallback")))
+	description := strings.TrimSpace(defaultString(set.Description(), generatedPageString(language, "setDescriptionFallback")))
 	if description != "" {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
 
-	if strings.TrimSpace(set.Link) != "" {
-		_, linkTarget := normalizeSetDocLink(set.Link)
+	if strings.TrimSpace(set.Link()) != "" {
+		_, linkTarget := normalizeSetDocLink(set.Link())
 		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(linkTarget)))
 	}
 
@@ -3607,7 +3591,7 @@ func setIcon(_ string) string {
 	return "folder"
 }
 
-func renderVarCard(variable compose.Var, description, class string, showMissingAsSecret bool, language string) string {
+func renderVarCard(variable compose.Var, description, class string, showQuestionPrefixAsRequired bool, language string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("{{< card link=\"\" title=\"%s\" cardType=\"var\"",
 		escapeShortcodeValue(variable.Key),
@@ -3619,24 +3603,15 @@ func renderVarCard(variable compose.Var, description, class string, showMissingA
 		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(strings.TrimSpace(variable.Link))))
 	}
 	defaultValue := strings.TrimSpace(variable.DefaultString())
-	hasVarValue := false
-	hasQuestionPrefix := showMissingAsSecret && strings.HasPrefix(defaultValue, "?")
+	hasQuestionPrefix := showQuestionPrefixAsRequired && strings.HasPrefix(defaultValue, "?")
 	if hasQuestionPrefix {
 		defaultValue = strings.TrimPrefix(defaultValue, "?")
 	}
-	if !variable.IsSecret() && defaultValue != "" {
-		if variable.IsReadonly() {
-			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue("envy:readonly:"+defaultValue)))
-		} else {
-			sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue(defaultValue)))
-		}
-		hasVarValue = true
+	if defaultValue != "" {
+		sb.WriteString(fmt.Sprintf(" var=\"%s\"", escapeShortcodeValue(defaultValue)))
 	}
 	if hasQuestionPrefix {
 		sb.WriteString(fmt.Sprintf(" tagBottom=\"%s\" tagBottomColor=\"red\"", escapeShortcodeValue(generatedPageString(language, "required"))))
-	}
-	if showMissingAsSecret && !hasVarValue {
-		sb.WriteString(fmt.Sprintf(" tagBottom=\"%s\" tagBottomColor=\"orange\"", escapeShortcodeValue(generatedPageString(language, "secret"))))
 	}
 	if class != "" {
 		sb.WriteString(fmt.Sprintf(" class=\"%s\"", escapeShortcodeValue(class)))
@@ -3646,19 +3621,13 @@ func renderVarCard(variable compose.Var, description, class string, showMissingA
 }
 
 func variableCardTag(variable compose.Var, language string) (string, string, string) {
-	if variable.IsSecret() {
-		return generatedPageString(language, "secret"), "orange", "false"
-	}
-	if variable.IsReadonly() {
-		return generatedPageString(language, "readonly"), "yellow", "false"
-	}
+	_ = variable
+	_ = language
 	return "", "", ""
 }
 
 func variableCardClass(variable compose.Var) string {
-	if variable.IsRequired() {
-		return "[&:user-invalid]:hx:border-red-500 [&:user-invalid]:hx:bg-red-50 [&:user-invalid]:hx:dark:bg-red-900/20"
-	}
+	_ = variable
 	return ""
 }
 
@@ -3667,27 +3636,11 @@ func variableCardSubtitle(variable compose.Var, language string) string {
 	if strings.TrimSpace(variable.Description) != "" {
 		parts = append(parts, strings.TrimSpace(variable.Description))
 	}
-
-	meta := make([]string, 0, 2)
-	if variable.IsRequired() {
-		meta = append(meta, generatedPageString(language, "required"))
-	}
-	if len(meta) > 0 {
-		parts = append(parts, strings.Join(meta, " · "))
-	}
+	_ = language
 
 	defaultValue := strings.TrimSpace(variable.DefaultString())
-	if defaultValue != "" {
-		if variable.IsSecret() {
-			parts = append(parts, generatedPageString(language, "defaultHidden"))
-		}
-	}
-
-	if strings.TrimSpace(variable.Example) != "" {
-		parts = append(parts, generatedPageString(language, "example")+": `"+strings.TrimSpace(variable.Example)+"`")
-	}
 	if len(parts) == 0 {
-		if defaultValue != "" || variable.IsSecret() {
+		if defaultValue != "" {
 			return ""
 		}
 	}

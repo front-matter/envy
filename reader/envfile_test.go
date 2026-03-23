@@ -35,8 +35,8 @@ DATABASE_URL=postgres://localhost/mydb
 		t.Error("expected 'env' set")
 	}
 
-	if len(set.Vars) != 3 {
-		t.Errorf("expected 3 variables, got %d", len(set.Vars))
+	if len(set.Vars()) != 3 {
+		t.Errorf("expected 3 variables, got %d", len(set.Vars()))
 	}
 }
 
@@ -61,7 +61,7 @@ func TestImportEnvFileNotFound(t *testing.T) {
 	}
 }
 
-func TestImportEnvFileTreatsAllVarsAsStrings(t *testing.T) {
+func TestImportEnvFilePreservesAllValuesAsStrings(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
 
@@ -84,13 +84,31 @@ EMPTY_VALUE=
 	}
 
 	set := m.Sets["env"]
-	for _, v := range set.Vars {
-		if v.Default != "" {
-			t.Errorf("%s: expected secret defaults to be empty, got %q", v.Key, v.Default)
+	for _, v := range set.Vars() {
+		if got := v.Default; got != mappableEnvValue(v.Key) {
+			t.Errorf("%s: expected default %q, got %q", v.Key, mappableEnvValue(v.Key), got)
 		}
-		if v.Secret != "true" {
-			t.Errorf("%s: expected secret to be string \"true\", got %q", v.Key, v.Secret)
-		}
+	}
+}
+
+func mappableEnvValue(key string) string {
+	switch key {
+	case "BOOL_TRUE":
+		return "true"
+	case "BOOL_FALSE":
+		return "false"
+	case "INT_VALUE":
+		return "42"
+	case "URL_REDIS":
+		return "redis://localhost:6379"
+	case "URL_DB":
+		return "postgres://user:pass@db:5432/db"
+	case "STRING_VALUE":
+		return "hello world"
+	case "EMPTY_VALUE":
+		return ""
+	default:
+		return ""
 	}
 }
 
@@ -115,12 +133,12 @@ func TestImportEnvFileEnvLocal(t *testing.T) {
 		t.Error("expected 'env' set")
 	}
 
-	if len(set.Vars) != 1 {
-		t.Errorf("expected 1 variable, got %d", len(set.Vars))
+	if len(set.Vars()) != 1 {
+		t.Errorf("expected 1 variable, got %d", len(set.Vars()))
 	}
 
-	if set.Vars[0].Key != "LOCAL_VAR" {
-		t.Errorf("expected variable LOCAL_VAR, got %s", set.Vars[0].Key)
+	if set.Vars()[0].Key != "LOCAL_VAR" {
+		t.Errorf("expected variable LOCAL_VAR, got %s", set.Vars()[0].Key)
 	}
 }
 
@@ -148,7 +166,7 @@ BANANA=b
 
 	// Verify variables are sorted
 	expected := []string{"APPLE", "BANANA", "MONKEY", "ZEBRA"}
-	for i, v := range set.Vars {
+	for i, v := range set.Vars() {
 		if v.Key != expected[i] {
 			t.Errorf("variable %d: expected %s, got %s", i, expected[i], v.Key)
 		}

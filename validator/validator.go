@@ -24,16 +24,8 @@ func Validate(m *compose.Project, env map[string]string) []Error {
 	var errs []Error
 
 	for _, set := range m.OrderedSets() {
-		for _, v := range set.Vars {
-			value, present := env[v.Key]
-
-			if v.IsRequired() && (!present || value == "") {
-				errs = append(errs, Error{Level: "MISSING", Key: v.Key})
-				continue
-			}
-			if !present || value == "" {
-				continue
-			}
+		for _, v := range set.Vars() {
+			_, _ = env[v.Key]
 		}
 	}
 

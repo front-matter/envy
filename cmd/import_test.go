@@ -10,6 +10,12 @@ import (
 	"github.com/front-matter/envy/compose"
 )
 
+func newImportTestSet(vars []compose.Var) compose.Set {
+	set := compose.NewSet()
+	set.SetVars(vars)
+	return set
+}
+
 func TestResolvePathFile(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "nested", "compose.yaml")
@@ -146,7 +152,7 @@ func TestFindImportFilesUsesEnvExampleWhenEnvMissing(t *testing.T) {
 	}
 }
 
-func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
+func TestImportCommandPreservesImportedVarsInOutput(t *testing.T) {
 	tmp := t.TempDir()
 	envPath := filepath.Join(tmp, ".env")
 	outputPath := filepath.Join(tmp, "compose.yml")
@@ -172,17 +178,17 @@ func TestImportCommandOmitsSecretVarsFromOutput(t *testing.T) {
 	}
 
 	output := string(data)
-	if strings.Contains(output, "BOOL_TRUE:") {
-		t.Fatalf("expected BOOL_TRUE to be omitted as secret var, got:\n%s", output)
+	if !strings.Contains(output, "BOOL_TRUE:") {
+		t.Fatalf("expected BOOL_TRUE to be preserved, got:\n%s", output)
 	}
-	if strings.Contains(output, "BOOL_FALSE:") {
-		t.Fatalf("expected BOOL_FALSE to be omitted as secret var, got:\n%s", output)
+	if !strings.Contains(output, "BOOL_FALSE:") {
+		t.Fatalf("expected BOOL_FALSE to be preserved, got:\n%s", output)
 	}
 	if strings.Contains(output, "secret:") {
 		t.Fatalf("expected no secret fields in generated compose.yaml, got:\n%s", output)
 	}
-	if strings.Contains(output, "sets:") {
-		t.Fatalf("expected sets section to be omitted when all vars are secret, got:\n%s", output)
+	if !strings.Contains(output, "x-set-env:") {
+		t.Fatalf("expected imported env set in generated compose.yaml, got:\n%s", output)
 	}
 	if !strings.Contains(output, "x-envy:") {
 		t.Fatalf("expected meta section in generated compose.yaml, got:\n%s", output)
@@ -197,9 +203,7 @@ func TestVerifyServiceCommandVarsDefinedOK(t *testing.T) {
 			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]compose.Set{
-			"worker": {
-				Vars: []compose.Var{{Key: "BROKER_URL"}},
-			},
+			"worker": newImportTestSet([]compose.Var{{Key: "BROKER_URL"}}),
 		},
 	}
 
@@ -216,9 +220,7 @@ func TestVerifyServiceCommandVarsDefinedMissing(t *testing.T) {
 			Sets:    []string{"worker"},
 		}},
 		Sets: map[string]compose.Set{
-			"worker": {
-				Vars: []compose.Var{{Key: "OTHER_VAR"}},
-			},
+			"worker": newImportTestSet([]compose.Var{{Key: "OTHER_VAR"}}),
 		},
 	}
 

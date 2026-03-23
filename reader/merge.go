@@ -12,9 +12,9 @@ import (
 func Merge(manifests ...*compose.Project) *compose.Project {
 	if len(manifests) == 0 {
 		return &compose.Project{
-			Meta:        compose.Meta{Title: "Merged Manifest", LanguageCode: "en-US", Version: "v1"},
+			Meta:     compose.Meta{Title: "Merged Manifest", LanguageCode: "en-US", Version: "v1"},
 			Services: []compose.Service{},
-			Sets:        make(map[string]compose.Set),
+			Sets:     make(map[string]compose.Set),
 		}
 	}
 
@@ -31,7 +31,7 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 			Version:      "v1",
 		},
 		Services: make([]compose.Service, len(manifests[0].Services)),
-		Sets:        make(map[string]compose.Set),
+		Sets:     make(map[string]compose.Set),
 	}
 
 	copy(merged.Services, manifests[0].Services)
@@ -55,25 +55,25 @@ func Merge(manifests ...*compose.Project) *compose.Project {
 				otherKeys := make(map[string]bool)
 				for gk, g := range merged.Sets {
 					if gk != "env" {
-						for _, v := range g.Vars {
+						for _, v := range g.Vars() {
 							otherKeys[v.Key] = true
 						}
 					}
 				}
 				// Filter env vars to exclude those already in other sets.
 				var filteredVars []compose.Var
-				for _, v := range set.Vars {
+				for _, v := range set.Vars() {
 					if !otherKeys[v.Key] {
 						filteredVars = append(filteredVars, v)
 					}
 				}
-				set.Vars = filteredVars
+				set.SetVars(filteredVars)
 			}
 
 			if existing, ok := merged.Sets[setKey]; ok {
 				// Set already exists, merge variables.
-				vars := mergeVars(existing.Vars, set.Vars)
-				existing.Vars = vars
+				vars := mergeVars(existing.Vars(), set.Vars())
+				existing.SetVars(vars)
 				// Update merged sets with the merged set.
 				merged.Sets[setKey] = existing
 			} else {

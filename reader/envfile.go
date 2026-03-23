@@ -25,9 +25,8 @@ func ImportEnvFile(path string) (*compose.Project, error) {
 	for _, key := range env.Keys {
 		vars = append(vars, compose.Var{
 			Key:         key,
-			Default:     "",
+			Default:     env.Values[key],
 			Description: "Imported from .env file",
-			Secret:      "true",
 		})
 	}
 
@@ -42,13 +41,13 @@ func ImportEnvFile(path string) (*compose.Project, error) {
 			LanguageCode: "en-US",
 			Version:      "v1",
 		},
-		Sets: map[string]compose.Set{
-			"env": {
-				Description: "Imported from .env file",
-				Vars:        vars,
-			},
-		},
+		Sets: map[string]compose.Set{},
 	}
+
+	set := compose.NewSet()
+	set.SetDescription("Imported from .env file")
+	set.SetVars(vars)
+	m.Sets["env"] = set
 
 	return m, nil
 }

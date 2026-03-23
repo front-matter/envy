@@ -8,6 +8,15 @@ import (
 	"github.com/front-matter/envy/envfile"
 )
 
+func newReaderTestSet(vars []compose.Var, configure ...func(*compose.Set)) compose.Set {
+	set := compose.NewSet()
+	set.SetVars(vars)
+	for _, fn := range configure {
+		fn(&set)
+	}
+	return set
+}
+
 func TestImportEnvFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	envPath := filepath.Join(tmpDir, ".env")
@@ -44,13 +53,13 @@ APP_NAME=TestApp
 		t.Errorf("expected 'env' set")
 	}
 
-	if len(set.Vars) != 5 {
-		t.Errorf("expected 5 vars, got %d", len(set.Vars))
+	if len(set.Vars()) != 5 {
+		t.Errorf("expected 5 vars, got %d", len(set.Vars()))
 	}
 
-	for _, v := range set.Vars {
-		if v.Key == "APP_NAME" && v.Default != "" {
-			t.Errorf("expected APP_NAME default to be empty for secret var, got %s", v.Default)
+	for _, v := range set.Vars() {
+		if v.Key == "APP_NAME" && v.Default != "TestApp" {
+			t.Errorf("expected APP_NAME default to be preserved, got %s", v.Default)
 		}
 	}
 }
@@ -59,12 +68,7 @@ func TestMergeManifests(t *testing.T) {
 	env1 := &compose.Project{
 		Meta: compose.Meta{Title: "env1", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"db": {
-				Vars: []compose.Var{
-					{Key: "DB_HOST", Default: "localhost"},
-					{Key: "DB_PORT", Default: "5432"},
-				},
-			},
+			"db": newReaderTestSet([]compose.Var{{Key: "DB_HOST", Default: "localhost"}, {Key: "DB_PORT", Default: "5432"}}),
 		},
 	}
 
@@ -74,17 +78,8 @@ func TestMergeManifests(t *testing.T) {
 			{Name: "web", Image: "nginx:latest"},
 		},
 		Sets: map[string]compose.Set{
-			"web": {
-				Vars: []compose.Var{
-					{Key: "APP_NAME", Default: "myapp"},
-				},
-			},
-			"db": {
-				Vars: []compose.Var{
-					{Key: "DB_HOST", Default: "db.example.com"},
-					{Key: "DB_USER", Default: "admin"},
-				},
-			},
+			"web": newReaderTestSet([]compose.Var{{Key: "APP_NAME", Default: "myapp"}}),
+			"db":  newReaderTestSet([]compose.Var{{Key: "DB_HOST", Default: "db.example.com"}, {Key: "DB_USER", Default: "admin"}}),
 		},
 	}
 
@@ -99,12 +94,12 @@ func TestMergeManifests(t *testing.T) {
 	}
 
 	dbGroup := merged.Sets["db"]
-	if len(dbGroup.Vars) != 3 {
-		t.Errorf("expected 3 vars in db set after merge, got %d", len(dbGroup.Vars))
+	if len(dbGroup.Vars()) != 3 {
+		t.Errorf("expected 3 vars in db set after merge, got %d", len(dbGroup.Vars()))
 	}
 
 	// Check that env2's version of DB_HOST (db.example.com) is used
-	for _, v := range dbGroup.Vars {
+	for _, v := range dbGroup.Vars() {
 		if v.Key == "DB_HOST" && v.Default != "db.example.com" {
 			t.Errorf("expected DB_HOST to be overridden to 'db.example.com', got %s", v.Default)
 		}
@@ -115,11 +110,7 @@ func TestMergeEmptyManifests(t *testing.T) {
 	m1 := &compose.Project{
 		Meta: compose.Meta{Title: "m1", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"app": {
-				Vars: []compose.Var{
-					{Key: "SETTING_1"},
-				},
-			},
+			"app": newReaderTestSet([]compose.Var{{Key: "SETTING_1"}}),
 		},
 	}
 
@@ -128,8 +119,8 @@ func TestMergeEmptyManifests(t *testing.T) {
 		t.Error("Merge must return non-nil manifest")
 	}
 
-	if len(merged.Sets["app"].Vars) != 1 {
-		t.Errorf("expected 1 var in app set, got %d", len(merged.Sets["app"].Vars))
+	if len(merged.Sets["app"].Vars()) != 1 {
+		t.Errorf("expected 1 var in app set, got %d", len(merged.Sets["app"].Vars()))
 	}
 
 	// Test merge with no manifests
@@ -146,46 +137,33 @@ func TestMergeThreeManifests(t *testing.T) {
 	m1 := &compose.Project{
 		Meta: compose.Meta{Title: "m1", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"app": {
-				Vars: []compose.Var{
-					{Key: "VAR_1", Default: "value1"},
-				},
-			},
+			"app": newReaderTestSet([]compose.Var{{Key: "VAR_1", Default: "value1"}}),
 		},
 	}
 
 	m2 := &compose.Project{
 		Meta: compose.Meta{Title: "m2", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"app": {
-				Vars: []compose.Var{
-					{Key: "VAR_2", Default: "value2"},
-				},
-			},
+			"app": newReaderTestSet([]compose.Var{{Key: "VAR_2", Default: "value2"}}),
 		},
 	}
 
 	m3 := &compose.Project{
 		Meta: compose.Meta{Title: "m3", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"app": {
-				Vars: []compose.Var{
-					{Key: "VAR_1", Default: "value1_updated"},
-					{Key: "VAR_3", Default: "value3"},
-				},
-			},
+			"app": newReaderTestSet([]compose.Var{{Key: "VAR_1", Default: "value1_updated"}, {Key: "VAR_3", Default: "value3"}}),
 		},
 	}
 
 	merged := Merge(m1, m2, m3)
 
 	appGroup := merged.Sets["app"]
-	if len(appGroup.Vars) != 3 {
-		t.Errorf("expected 3 vars after merging 3 manifests, got %d", len(appGroup.Vars))
+	if len(appGroup.Vars()) != 3 {
+		t.Errorf("expected 3 vars after merging 3 manifests, got %d", len(appGroup.Vars()))
 	}
 
 	// Check that last source wins for VAR_1
-	for _, v := range appGroup.Vars {
+	for _, v := range appGroup.Vars() {
 		if v.Key == "VAR_1" && v.Default != "value1_updated" {
 			t.Errorf("expected VAR_1 to be 'value1_updated' from m3, got %s", v.Default)
 		}
@@ -199,39 +177,29 @@ func TestMergeSkipsEnvVarsAlreadyPresentInComposeSets(t *testing.T) {
 			{Name: "web", Sets: []string{"web"}},
 		},
 		Sets: map[string]compose.Set{
-			"web": {
-				Vars: []compose.Var{
-					{Key: "APP_ENV", Default: "production"},
-					{Key: "DB_HOST", Default: "db"},
-				},
-			},
+			"web": newReaderTestSet([]compose.Var{{Key: "APP_ENV", Default: "production"}, {Key: "DB_HOST", Default: "db"}}),
 		},
 	}
 
 	envFile := &compose.Project{
 		Meta: compose.Meta{Title: "env", Version: "v1"},
 		Sets: map[string]compose.Set{
-			"env": {
-				Vars: []compose.Var{
-					{Key: "APP_ENV", Default: "local"},
-					{Key: "EXTRA_ONLY", Default: "1"},
-				},
-			},
+			"env": newReaderTestSet([]compose.Var{{Key: "APP_ENV", Default: "local"}, {Key: "EXTRA_ONLY", Default: "1"}}),
 		},
 	}
 
 	merged := Merge(composeManifest, envFile)
 
 	envGroup := merged.Sets["env"]
-	if len(envGroup.Vars) != 1 {
-		t.Fatalf("expected only 1 env var after dedupe, got %d", len(envGroup.Vars))
+	if len(envGroup.Vars()) != 1 {
+		t.Fatalf("expected only 1 env var after dedupe, got %d", len(envGroup.Vars()))
 	}
-	if envGroup.Vars[0].Key != "EXTRA_ONLY" {
-		t.Fatalf("expected EXTRA_ONLY to remain in env set, got %s", envGroup.Vars[0].Key)
+	if envGroup.Vars()[0].Key != "EXTRA_ONLY" {
+		t.Fatalf("expected EXTRA_ONLY to remain in env set, got %s", envGroup.Vars()[0].Key)
 	}
 
 	webGroup := merged.Sets["web"]
-	for _, v := range webGroup.Vars {
+	for _, v := range webGroup.Vars() {
 		if v.Key == "APP_ENV" && v.Default != "production" {
 			t.Fatalf("expected compose APP_ENV to be preserved, got %s", v.Default)
 		}

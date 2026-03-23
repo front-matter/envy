@@ -74,26 +74,34 @@ type serviceYAML struct {
 	Sets        *yaml.Node `yaml:"sets,omitempty"`
 }
 
-// Set is a logical grouping of related env variables.
-type Set struct {
-	Key         string `yaml:"-"`
-	Description string `yaml:"description,omitempty"`
-	Link        string `yaml:"link,omitempty"`
-	Vars        []Var  `yaml:"vars,omitempty"`
+// Set is a logical grouping of related env variables
+// aligning with compose-go's MappingWithEquals to
+// leverage YAML encoding/decoding and preserve field order.
+type Set types.MappingWithEquals
+
+const setInternalPrefix = "__envy_set."
+
+func setMetadataKey(name string) string {
+	return setInternalPrefix + name
 }
 
-// Var defines a single environment variable and extends compose-go's
-// MappingWithEquals with envy-specific settings.
+func setVarsStorageKey() string {
+	return setInternalPrefix + "vars"
+}
+
+// Var defines a single environment variable
 type Var struct {
-	types.MappingWithEquals `yaml:",inline"`
-	Key                     string `yaml:"key"`
-	Description             string `yaml:"description,omitempty"`
-	Link                    string `yaml:"-"`
-	Default                 string `yaml:"default,omitempty"`
-	Required                string `yaml:"required,omitempty"`
-	Secret                  string `yaml:"secret,omitempty"`
-	Readonly                string `yaml:"readonly,omitempty"`
-	Example                 string `yaml:"example,omitempty"`
+	Key         string `yaml:"key"`
+	Description string `yaml:"description,omitempty"`
+	Link        string `yaml:"-"`
+	Default     string `yaml:"default,omitempty"`
+}
+
+type setVarPayload struct {
+	Key         string `yaml:"key"`
+	Description string `yaml:"description,omitempty"`
+	Link        string `yaml:"link,omitempty"`
+	Default     string `yaml:"default,omitempty"`
 }
 
 // SetVars holds vars for a single set.
@@ -190,7 +198,7 @@ func (p *Project) NetworkNames() []string {
 func (m Project) MarshalYAML() (interface{}, error) {
 	filteredSets := make(map[string]Set)
 	for key, set := range m.Sets {
-		if len(set.Vars) > 0 {
+		if len(set.Vars()) > 0 {
 			filteredSets[key] = set
 		}
 	}
@@ -206,7 +214,7 @@ func (m Project) MarshalYAML() (interface{}, error) {
 
 	if len(filteredSets) > 0 {
 		for _, set := range m.OrderedSets() {
-			filtered, ok := filteredSets[set.Key]
+			filtered, ok := filteredSets[set.Key()]
 			if !ok {
 				continue
 			}
@@ -214,9 +222,9 @@ func (m Project) MarshalYAML() (interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
-			setNode.Anchor = set.Key
-			setNodes[set.Key] = setNode
-			appendMapping(root, "x-set-"+set.Key, setNode)
+			setNode.Anchor = set.Key()
+			setNodes[set.Key()] = setNode
+			appendMapping(root, "x-set-"+set.Key(), setNode)
 		}
 	}
 
@@ -290,11 +298,11 @@ func (m *Project) UnmarshalYAML(node *yaml.Node) error {
 				}
 
 				description, link := extractSetMetadataFromComments(node, i)
-				if set.Description == "" {
-					set.Description = description
+				if set.Description() == "" {
+					set.SetDescription(description)
 				}
-				if set.Link == "" {
-					set.Link = link
+				if set.Link() == "" {
+					set.SetLink(link)
 				}
 
 				if out.Sets == nil {
@@ -497,7 +505,7 @@ func (m *Project) OrderedSets() []Set {
 	sets := make([]Set, 0, len(keys))
 	for _, key := range keys {
 		set := m.Sets[key]
-		set.Key = key
+		set.SetKey(key)
 		sets = append(sets, set)
 	}
 
@@ -505,10 +513,109 @@ func (m *Project) OrderedSets() []Set {
 }
 
 func (v Var) DefaultString() string {
-	if v.IsSecret() {
+	return v.Default
+}
+
+func NewSet() Set {
+	return Set{}
+}
+
+func (s *Set) ensureMap() types.MappingWithEquals {
+	if *s == nil {
+		*s = Set{}
+	}
+	return types.MappingWithEquals(*s)
+}
+
+func (s Set) get(key string) string {
+	m := types.MappingWithEquals(s)
+	if m == nil {
 		return ""
 	}
-	return v.Default
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	return *raw
+}
+
+func (s *Set) set(key, value string) {
+	m := s.ensureMap()
+	v := value
+	m[key] = &v
+}
+
+func (s *Set) delete(key string) {
+	delete(s.ensureMap(), key)
+}
+
+func (s Set) Key() string         { return s.get(setMetadataKey("key")) }
+func (s Set) Description() string { return s.get(setMetadataKey("description")) }
+func (s Set) Link() string        { return s.get(setMetadataKey("link")) }
+func (s Set) Vars() []Var {
+	payload := strings.TrimSpace(s.get(setVarsStorageKey()))
+	if payload == "" {
+		return nil
+	}
+	var stored []setVarPayload
+	if err := yaml.Unmarshal([]byte(payload), &stored); err != nil {
+		return nil
+	}
+	vars := make([]Var, 0, len(stored))
+	for _, variable := range stored {
+		vars = append(vars, Var{
+			Key:         variable.Key,
+			Description: variable.Description,
+			Link:        variable.Link,
+			Default:     variable.Default,
+		})
+	}
+	return vars
+}
+
+func (s *Set) SetKey(value string)         { s.set(setMetadataKey("key"), value) }
+func (s *Set) SetDescription(value string) { s.set(setMetadataKey("description"), value) }
+func (s *Set) SetLink(value string)        { s.set(setMetadataKey("link"), value) }
+func (s *Set) SetVars(vars []Var) {
+	normalized := make([]Var, 0, len(vars))
+	seen := make(map[string]struct{}, len(vars))
+	for _, variable := range vars {
+		key := strings.TrimSpace(variable.Key)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			for index := range normalized {
+				if normalized[index].Key == key {
+					normalized[index] = variable
+					break
+				}
+			}
+			continue
+		}
+		seen[key] = struct{}{}
+		variable.Key = key
+		normalized = append(normalized, variable)
+	}
+	if len(normalized) == 0 {
+		s.delete(setVarsStorageKey())
+		return
+	}
+	stored := make([]setVarPayload, 0, len(normalized))
+	for _, variable := range normalized {
+		stored = append(stored, setVarPayload{
+			Key:         variable.Key,
+			Description: variable.Description,
+			Link:        variable.Link,
+			Default:     variable.Default,
+		})
+	}
+	payload, err := yaml.Marshal(stored)
+	if err != nil {
+		s.delete(setVarsStorageKey())
+		return
+	}
+	s.set(setVarsStorageKey(), string(payload))
 }
 
 func (v *Var) UnmarshalYAML(node *yaml.Node) error {
@@ -518,24 +625,8 @@ func (v *Var) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 
-	if strings.EqualFold(strings.TrimSpace(decoded.Secret), "true") {
-		decoded.Default = ""
-	}
-
 	*v = Var(decoded)
 	return nil
-}
-
-func (v Var) IsRequired() bool {
-	return strings.EqualFold(strings.TrimSpace(v.Required), "true")
-}
-
-func (v Var) IsSecret() bool {
-	return strings.EqualFold(strings.TrimSpace(v.Secret), "true")
-}
-
-func (v Var) IsReadonly() bool {
-	return strings.EqualFold(strings.TrimSpace(v.Readonly), "true")
 }
 
 // MarshalYAML omits import placeholder descriptions and emits defaults as strings.
@@ -550,18 +641,6 @@ func (v Var) MarshalYAML() (interface{}, error) {
 		appendMapping(node, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: description})
 	}
 	appendMapping(node, "default", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.DefaultString()})
-	if v.IsRequired() {
-		appendMapping(node, "required", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
-	}
-	if v.IsSecret() {
-		appendMapping(node, "secret", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
-	}
-	if v.IsReadonly() {
-		appendMapping(node, "readonly", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: "true"})
-	}
-	if v.Example != "" {
-		appendMapping(node, "example", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: v.Example})
-	}
 
 	return node, nil
 }
@@ -598,14 +677,14 @@ func appendMapping(node *yaml.Node, key string, value *yaml.Node) {
 
 func encodeSetNode(set Set) (*yaml.Node, error) {
 	setNode := &yaml.Node{Kind: yaml.MappingNode}
-	if set.Description != "" {
-		appendMapping(setNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Description})
+	if set.Description() != "" {
+		appendMapping(setNode, "description", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Description()})
 	}
-	if set.Link != "" {
-		appendMapping(setNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Link})
+	if set.Link() != "" {
+		appendMapping(setNode, "link", &yaml.Node{Kind: yaml.ScalarNode, Value: set.Link()})
 	}
-	if len(set.Vars) > 0 {
-		for _, v := range set.Vars {
+	if len(set.Vars()) > 0 {
+		for _, v := range set.Vars() {
 			varNodeValue, err := v.MarshalYAML()
 			if err != nil {
 				return nil, err
@@ -776,7 +855,7 @@ func decodeSetsNode(node *yaml.Node) (map[string]Set, error) {
 }
 
 func decodeSetNode(node *yaml.Node) (Set, error) {
-	var out Set
+	out := NewSet()
 	if node.Kind != yaml.MappingNode {
 		return out, fmt.Errorf("expected set mapping, got YAML kind %d", node.Kind)
 	}
@@ -785,19 +864,23 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 		value := node.Content[i+1]
 		switch key {
 		case "description":
-			if err := value.Decode(&out.Description); err != nil {
+			var description string
+			if err := value.Decode(&description); err != nil {
 				return out, err
 			}
+			out.SetDescription(description)
 		case "link":
-			if err := value.Decode(&out.Link); err != nil {
+			var link string
+			if err := value.Decode(&link); err != nil {
 				return out, err
 			}
+			out.SetLink(link)
 		case "vars":
 			vars, err := decodeVarsNode(value)
 			if err != nil {
 				return out, err
 			}
-			out.Vars = vars
+			out.SetVars(vars)
 		default:
 			comments := []string{
 				node.Content[i].HeadComment,
@@ -816,9 +899,6 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 					return out, err
 				}
 				v := Var{Key: key, Default: scalar}
-				if isImplicitSecretScalar(value) {
-					v.Secret = "true"
-				}
 				v = normalizeVarComposeSyntax(v)
 				if strings.TrimSpace(v.Description) == "" {
 					v.Description = commentDescription
@@ -826,7 +906,7 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 				if strings.TrimSpace(v.Link) == "" {
 					v.Link = commentLink
 				}
-				out.Vars = append(out.Vars, v)
+				out.SetVars(append(out.Vars(), v))
 				continue
 			}
 
@@ -842,25 +922,10 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 			if strings.TrimSpace(v.Link) == "" {
 				v.Link = commentLink
 			}
-			out.Vars = append(out.Vars, v)
+			out.SetVars(append(out.Vars(), v))
 		}
 	}
 	return out, nil
-}
-
-func isImplicitSecretScalar(node *yaml.Node) bool {
-	if node == nil || node.Kind != yaml.ScalarNode {
-		return false
-	}
-	if strings.TrimSpace(node.Value) != "" {
-		return false
-	}
-	switch node.Style {
-	case yaml.DoubleQuotedStyle, yaml.SingleQuotedStyle:
-		return false
-	default:
-		return true
-	}
 }
 
 func parseSetMetadataFromComments(comments ...string) (string, string) {
@@ -1095,36 +1160,18 @@ func decodeVarsNode(node *yaml.Node) ([]Var, error) {
 }
 
 func normalizeVarComposeSyntax(v Var) Var {
-	parsedDefault, parsedRequired, parsedReadonly := parseComposeDefaultSyntax(v.Default)
-	v.Default = parsedDefault
-
-	if strings.TrimSpace(v.Required) == "" {
-		if parsedRequired {
-			v.Required = "true"
-		} else {
-			v.Required = "false"
-		}
-	}
-
-	if strings.TrimSpace(v.Readonly) == "" {
-		if parsedReadonly {
-			v.Readonly = "true"
-		} else {
-			v.Readonly = "false"
-		}
-	}
-
+	v.Default = parseComposeDefaultSyntax(v.Default)
 	return v
 }
 
-func parseComposeDefaultSyntax(value string) (defaultValue string, required bool, readonly bool) {
+func parseComposeDefaultSyntax(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", false, false
+		return ""
 	}
 	matches := composeInterpolationPattern.FindStringSubmatch(value)
 	if len(matches) == 0 {
-		return value, false, true
+		return value
 	}
 
 	operator := matches[2]
@@ -1132,13 +1179,13 @@ func parseComposeDefaultSyntax(value string) (defaultValue string, required bool
 
 	switch operator {
 	case "":
-		return "", true, false
+		return ""
 	case ":-", "-":
-		return rawDefault, false, false
+		return rawDefault
 	case ":?", "?":
-		return rawDefault, true, false
+		return rawDefault
 	default:
-		return value, false, true
+		return value
 	}
 }
 
@@ -1169,7 +1216,7 @@ func decodeNamedEntriesNode(node *yaml.Node) ([]string, error) {
 func (m *Project) AllVars() []Var {
 	var vars []Var
 	for _, set := range m.OrderedSets() {
-		vars = append(vars, set.Vars...)
+		vars = append(vars, set.Vars()...)
 	}
 	return vars
 }
@@ -1187,7 +1234,7 @@ func (m *Project) VarsForServiceBySet(serviceName string) []SetVars {
 	if name == "" {
 		var result []SetVars
 		for _, set := range m.OrderedSets() {
-			result = append(result, SetVars{SetKey: set.Key, Description: set.Description, Vars: set.Vars})
+			result = append(result, SetVars{SetKey: set.Key(), Description: set.Description(), Vars: set.Vars()})
 		}
 		return result
 	}
@@ -1202,14 +1249,14 @@ func (m *Project) VarsForServiceBySet(serviceName string) []SetVars {
 			if !ok {
 				continue
 			}
-			result = append(result, SetVars{SetKey: setKey, Description: set.Description, Vars: set.Vars})
+			result = append(result, SetVars{SetKey: setKey, Description: set.Description(), Vars: set.Vars()})
 		}
 		return result
 	}
 
 	var result []SetVars
 	for _, set := range m.OrderedSets() {
-		result = append(result, SetVars{SetKey: set.Key, Description: set.Description, Vars: set.Vars})
+		result = append(result, SetVars{SetKey: set.Key(), Description: set.Description(), Vars: set.Vars()})
 	}
 	return result
 }
@@ -1232,34 +1279,12 @@ func (m *Project) VarsForService(serviceName string) []Var {
 			if !ok {
 				continue
 			}
-			vars = append(vars, set.Vars...)
+			vars = append(vars, set.Vars()...)
 		}
 		return vars
 	}
 
 	return m.AllVars()
-}
-
-// SecretVars returns only variables marked secret.
-func (m *Project) SecretVars() []Var {
-	var vars []Var
-	for _, v := range m.AllVars() {
-		if v.IsSecret() {
-			vars = append(vars, v)
-		}
-	}
-	return vars
-}
-
-// RequiredVars returns only variables marked required.
-func (m *Project) RequiredVars() []Var {
-	var vars []Var
-	for _, v := range m.AllVars() {
-		if v.IsRequired() {
-			vars = append(vars, v)
-		}
-	}
-	return vars
 }
 
 // Lint returns warnings for values that are legal but potentially ambiguous.

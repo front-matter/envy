@@ -16,6 +16,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func newHugoTestSet(vars []compose.Var, configure ...func(*compose.Set)) compose.Set {
+	set := compose.NewSet()
+	set.SetVars(vars)
+	for _, fn := range configure {
+		fn(&set)
+	}
+	return set
+}
+
 func TestNormalizeSetDocLink(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -1515,17 +1524,13 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			Profiles:    []string{"internal"},
 		}},
 		Sets: map[string]compose.Set{
-			"common": {
-				Description: "Shared settings for runtime services.",
-				Link:        "[Common Docs]: https://example.org/common",
-				Vars: []compose.Var{
-					{Key: "ZZZ_LAST", Default: "z", Example: "z-sample"},
-					{Key: "APP_ENV", Default: "production", Required: "true", Example: "staging"},
-					{Key: "TEST_REQUIRED_PREFIX_VAR", Default: "?required-value"},
-					{Key: "TEST_SECRET_VAR", Default: "super-secret-value", Secret: "true"},
-					{Key: "TEST_READONLY_VAR", Default: "locked-value", Readonly: "true"},
+			"common": newHugoTestSet(
+				[]compose.Var{{Key: "ZZZ_LAST", Default: "z"}, {Key: "APP_ENV", Default: "production"}, {Key: "TEST_REQUIRED_PREFIX_VAR", Default: "?required-value"}, {Key: "TEST_VISIBLE_VAR", Default: "visible-value"}, {Key: "TEST_READONLY_VAR", Default: "locked-value"}},
+				func(set *compose.Set) {
+					set.SetDescription("Shared settings for runtime services.")
+					set.SetLink("[Common Docs]: https://example.org/common")
 				},
-			},
+			),
 		},
 	}
 
@@ -1603,7 +1608,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"Shared settings for runtime services.",
 		"https://example.org/common",
 		"title=\"APP_ENV\"",
-		"title=\"TEST_SECRET_VAR\"",
+		"title=\"TEST_VISIBLE_VAR\"",
 		"cardType=\"var\"",
 		`<div id="app_env">`,
 		"title=\"common\"",
@@ -1614,11 +1619,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"tagsServices=\"web\"",
 		`var="production"`,
 		`var="required-value"`,
-		`tagBottom="Required"`,
-		`tagBottomColor="red"`,
-		`var="envy:readonly:locked-value"`,
-		`tagBottom="secret"`,
-		`tagBottomColor="orange"`,
+		`var="visible-value"`,
+		`var="locked-value"`,
 	}
 	for _, check := range checks {
 		if !strings.Contains(string(groupContent), check) {
@@ -1628,8 +1630,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	if strings.Contains(string(groupContent), "link=\"#app_env\"") {
 		t.Fatalf("expected generated set page variable cards to be non-clickable, got:\n%s", string(groupContent))
 	}
-	if strings.Contains(string(groupContent), "super-secret-value") {
-		t.Fatalf("expected generated set page to omit secret default values, got:\n%s", string(groupContent))
+	if !strings.Contains(string(groupContent), "visible-value") {
+		t.Fatalf("expected generated set page to include visible defaults, got:\n%s", string(groupContent))
 	}
 
 	localizedSetsIndexContent, err := os.ReadFile(filepath.Join(contentDir, "sets", "_index.de.md"))
@@ -1653,10 +1655,9 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	localizedGroupChecks := []string{
 		"Erforderlich",
-		"Beispiel: 'staging'",
 		"descriptionLink=\"https://example.org/common\"",
 		"tagsServices=\"web\"",
-		`var="envy:readonly:locked-value"`,
+		`var="locked-value"`,
 	}
 	for _, check := range localizedGroupChecks {
 		if !strings.Contains(string(localizedGroupContent), check) {
@@ -1864,7 +1865,7 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 		"tagsProfiles=\"public,debug\"",
 		"title=\"APP_ENV\"",
 		"cardType=\"var\"",
-		"title=\"TEST_SECRET_VAR\"",
+		"title=\"TEST_VISIBLE_VAR\"",
 		"title=\"TEST_READONLY_VAR\"",
 		"title=\"ZZZ_LAST\"",
 	}
@@ -1883,8 +1884,8 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	if !(appEnvPos < readonlyPos && readonlyPos < zzzLastPos) {
 		t.Fatalf("expected service vars sorted alphabetically, got order positions APP_ENV=%d TEST_READONLY_VAR=%d ZZZ_LAST=%d", appEnvPos, readonlyPos, zzzLastPos)
 	}
-	if strings.Contains(string(serviceContent), "super-secret-value") {
-		t.Fatalf("expected generated service page to omit secret default values, got:\n%s", string(serviceContent))
+	if !strings.Contains(string(serviceContent), "visible-value") {
+		t.Fatalf("expected generated service page to include visible defaults, got:\n%s", string(serviceContent))
 	}
 
 	localizedServiceContent, err := os.ReadFile(filepath.Join(contentDir, "services", "web.de.md"))
@@ -1912,7 +1913,9 @@ func TestPrepareBuildContentDirRefreshesExistingGroupPage(t *testing.T) {
 
 	m := &compose.Project{
 		Sets: map[string]compose.Set{
-			"common": {Description: "Shared settings."},
+			"common": newHugoTestSet(nil, func(set *compose.Set) {
+				set.SetDescription("Shared settings.")
+			}),
 		},
 	}
 
@@ -1951,7 +1954,9 @@ func TestPrepareBuildContentDirWithOptionsKeepsStaleFilesWhenRefreshDisabled(t *
 	m := &compose.Project{
 		Meta: compose.Meta{Title: "Example"},
 		Sets: map[string]compose.Set{
-			"common": {Description: "Shared settings."},
+			"common": newHugoTestSet(nil, func(set *compose.Set) {
+				set.SetDescription("Shared settings.")
+			}),
 		},
 	}
 

@@ -99,7 +99,7 @@ Examples:
 		}
 
 		// Marshal and write
-		content, err := yaml.Marshal(filterSecretVars(merged))
+		content, err := yaml.Marshal(merged)
 		if err != nil {
 			return fmt.Errorf("rendering manifest YAML: %w", err)
 		}
@@ -282,32 +282,4 @@ func verifyServiceCommandVarsDefined(m *compose.Project) []string {
 	}
 
 	return issues
-}
-
-// filterSecretVars removes vars marked as secret from sets before writing compose.yaml.
-func filterSecretVars(m *compose.Project) *compose.Project {
-	if m == nil {
-		return nil
-	}
-
-	out := *m
-	out.Services = append([]compose.Service(nil), m.Services...)
-	out.SetVolumeNames(append([]string(nil), m.VolumeNames()...))
-	out.SetNetworkNames(append([]string(nil), m.NetworkNames()...))
-
-	out.Sets = make(map[string]compose.Set, len(m.Sets))
-	for setKey, set := range m.Sets {
-		filteredVars := make([]compose.Var, 0, len(set.Vars))
-		for _, v := range set.Vars {
-			if v.IsSecret() {
-				continue
-			}
-			filteredVars = append(filteredVars, v)
-		}
-
-		set.Vars = filteredVars
-		out.Sets[setKey] = set
-	}
-
-	return &out
 }

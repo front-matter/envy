@@ -34,28 +34,20 @@ func renderMarkdown(m *compose.Project) string {
 	))
 
 	for _, set := range m.OrderedSets() {
-		sb.WriteString(fmt.Sprintf("## %s\n\n", set.Key))
-		sb.WriteString(fmt.Sprintf("%s\n\n", set.Description))
-		sb.WriteString("| Variable | Required | Default | Description |\n")
-		sb.WriteString("|---|---|---|---|\n")
+		sb.WriteString(fmt.Sprintf("## %s\n\n", set.Key()))
+		sb.WriteString(fmt.Sprintf("%s\n\n", set.Description()))
+		sb.WriteString("| Variable | Default | Description |\n")
+		sb.WriteString("|---|---|---|\n")
 
-		for _, v := range set.Vars {
-			req := "—"
-			if v.IsRequired() {
-				req = "✅"
-			}
-			secret := ""
-			if v.IsSecret() {
-				secret = " 🔒"
-			}
+		for _, v := range set.Vars() {
 			defaultVal := "—"
 			if v.DefaultString() != "" {
 				defaultVal = fmt.Sprintf("`%s`", v.DefaultString())
 			}
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
 			sb.WriteString(fmt.Sprintf(
-				"| `%s`%s | %s | %s | %s |\n",
-				v.Key, secret, req, defaultVal, desc,
+				"| `%s` | %s | %s |\n",
+				v.Key, defaultVal, desc,
 			))
 		}
 		sb.WriteString("\n")
@@ -74,16 +66,12 @@ func renderRST(m *compose.Project) string {
 	sb.WriteString(strings.Repeat("=", len(title)) + "\n\n")
 
 	for _, set := range m.OrderedSets() {
-		sb.WriteString(set.Key + "\n")
-		sb.WriteString(strings.Repeat("-", len(set.Key)) + "\n\n")
-		sb.WriteString(set.Description + "\n\n")
+		sb.WriteString(set.Key() + "\n")
+		sb.WriteString(strings.Repeat("-", len(set.Key())) + "\n\n")
+		sb.WriteString(set.Description() + "\n\n")
 
-		for _, v := range set.Vars {
-			req := ""
-			if v.IsRequired() {
-				req = " *(required)*"
-			}
-			sb.WriteString(fmt.Sprintf(".. envvar:: %s%s\n\n", v.Key, req))
+		for _, v := range set.Vars() {
+			sb.WriteString(fmt.Sprintf(".. envvar:: %s\n\n", v.Key))
 			desc := strings.TrimSpace(v.Description)
 			for _, line := range strings.Split(desc, "\n") {
 				sb.WriteString(fmt.Sprintf("   %s\n", line))
@@ -107,12 +95,8 @@ func renderTable(m *compose.Project) string {
 	sb.WriteString(strings.Repeat("─", len(header)) + "\n")
 
 	for _, set := range m.OrderedSets() {
-		sb.WriteString(fmt.Sprintf("\n# %s\n", set.Key))
-		for _, v := range set.Vars {
-			req := "opt"
-			if v.IsRequired() {
-				req = "REQ"
-			}
+		sb.WriteString(fmt.Sprintf("\n# %s\n", set.Key()))
+		for _, v := range set.Vars() {
 			desc := strings.ReplaceAll(strings.TrimSpace(v.Description), "\n", " ")
 			if len(desc) > 60 {
 				desc = desc[:57] + "..."
@@ -122,8 +106,8 @@ func renderTable(m *compose.Project) string {
 				defaultVal = defaultVal[:35] + "..."
 			}
 			sb.WriteString(fmt.Sprintf(
-				"%-60s %-4s %-40s %s\n",
-				v.Key, req, defaultVal, desc,
+				"%-60s %-40s %s\n",
+				v.Key, defaultVal, desc,
 			))
 		}
 	}

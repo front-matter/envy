@@ -74,21 +74,15 @@ envy lint
 # See what's missing or undocumented
 envy diff .env.prod
 
-# Initial setup — generate a safe template to commit
-envy generate --no-secrets > .env.example
+# Initial setup — generate a template to commit
+envy generate > .env.example
 
 # Create your local .env from the template
 cp .env.example .env
-# ... fill in secrets ...
+# ... adjust values ...
 
 # Validate before deploying
 envy validate .env.prod
-
-# List all secret variables
-envy secrets
-
-# Scan git-tracked files for exposed secrets
-envy secrets --check
 
 # Print envy version
 envy --version

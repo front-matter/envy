@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	generateNoSecrets bool
-	generateOutput    string
-	generateFile      string
+	generateOutput string
+	generateFile   string
 )
 
 var generateCmd = &cobra.Command{
@@ -23,7 +22,7 @@ var generateCmd = &cobra.Command{
 	Long: `Generate a documented .env file from compose.yaml.
 
 Examples:
-  envy generate --no-secrets > .env.example
+	envy generate > .env.example
 	envy generate --file out/
   envy generate -o .env.local`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,9 +36,7 @@ Examples:
 			return err
 		}
 
-		content := writer.Generate(m, writer.Options{
-			IncludeSecrets: !generateNoSecrets,
-		})
+		content := writer.Generate(m)
 
 		if cmd.Flags().Changed("file") && cmd.Flags().Changed("output") {
 			return fmt.Errorf("use only one of --output or --file")
@@ -71,8 +68,6 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(generateCmd)
-	generateCmd.Flags().BoolVar(&generateNoSecrets, "no-secrets", false,
-		"Omit secret values (safe for .env.example)")
 	generateCmd.Flags().StringVarP(&generateOutput, "output", "o", "",
 		"Write to file instead of stdout")
 	generateCmd.Flags().StringVarP(&generateFile, "file", "f", "",
