@@ -91,6 +91,115 @@ func TestRenderServiceCardUsesDescriptionLink(t *testing.T) {
 	}
 }
 
+func TestRenderVarCardUsesOptionalDescriptionAndLink(t *testing.T) {
+	variable := hugoVar{
+		Key:         "INVENIO_OIDC_ISSUER",
+		Value:       strPtr(""),
+		Description: "OpenID Connect issuer URL for authentication.",
+		Link:        "https://auth-wiki.logto.io/openid-connect-discovery",
+	}
+
+	card := renderVarCard(variable, variableCardSubtitle(variable, "en"), "", true, "en")
+	if !strings.Contains(card, "description=`OpenID Connect issuer URL for authentication.`") {
+		t.Fatalf("expected var card description, got:\n%s", card)
+	}
+	if !strings.Contains(card, "descriptionLink=\"https://auth-wiki.logto.io/openid-connect-discovery\"") {
+		t.Fatalf("expected var card link, got:\n%s", card)
+	}
+}
+
+func TestRenderVarCardOmitsDescriptionAndLinkWhenNotProvided(t *testing.T) {
+	variable := hugoVar{Key: "APP_ENV", Value: strPtr("production")}
+
+	card := renderVarCard(variable, variableCardSubtitle(variable, "en"), "", true, "en")
+	if strings.Contains(card, "description=") {
+		t.Fatalf("expected no description attribute, got:\n%s", card)
+	}
+	if strings.Contains(card, "descriptionLink=") {
+		t.Fatalf("expected no descriptionLink attribute, got:\n%s", card)
+	}
+}
+
+func TestGenerateSetMarkdownIncludesAuthenticationVarDescriptionAndLink(t *testing.T) {
+	set := newHugoTestSet(
+		types.MappingWithEquals{
+			"INVENIO_OIDC_ISSUER": strPtr(""),
+		},
+		func(s *compose.Set) {
+			s.SetKey("authentication")
+			s.SetVarDescription("INVENIO_OIDC_ISSUER", "OpenID Connect issuer URL for authentication.")
+			s.SetVarLink("INVENIO_OIDC_ISSUER", "https://auth-wiki.logto.io/openid-connect-discovery")
+		},
+	)
+
+	m := &compose.Project{
+		Meta: compose.Meta{Title: "Example"},
+		Services: map[string]compose.Service{
+			"web": {
+				Name: "web",
+				Sets: []string{"authentication"},
+			},
+		},
+		Sets: map[string]compose.Set{
+			"authentication": set,
+		},
+	}
+
+	content := generateSetMarkdown(m, set, "en")
+	if !strings.Contains(content, `title="INVENIO_OIDC_ISSUER"`) {
+		t.Fatalf("expected variable card for INVENIO_OIDC_ISSUER, got:\n%s", content)
+	}
+	if !strings.Contains(content, "description=`OpenID Connect issuer URL for authentication.`") {
+		t.Fatalf("expected variable description on card, got:\n%s", content)
+	}
+	if !strings.Contains(content, `descriptionLink="https://auth-wiki.logto.io/openid-connect-discovery"`) {
+		t.Fatalf("expected variable descriptionLink on card, got:\n%s", content)
+	}
+}
+
+func TestGenerateSetMarkdownFromComposeCommentsIncludesSetAndVarMetadata(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"# Authentication configuration for web login.",
+		"# Link: https://example.org/authentication",
+		"x-set-authentication: &authentication",
+		"  # OpenID Connect issuer URL for authentication.",
+		"  # Link: https://auth-wiki.logto.io/openid-connect-discovery",
+		"  INVENIO_OIDC_ISSUER: \"${INVENIO_OIDC_ISSUER:-}\"",
+		"services:",
+		"  web:",
+		"    image: nginx:1.27",
+		"    environment:",
+		"      !!merge <<: [ *authentication ]",
+	}, "\n")
+
+	var m compose.Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	set, ok := m.Sets["authentication"]
+	if !ok {
+		t.Fatalf("expected authentication set to be present")
+	}
+
+	content := generateSetMarkdown(&m, set, "en")
+	checks := []string{
+		`title="authentication"`,
+		"description=`Authentication configuration for web login.`",
+		`descriptionLink="https://example.org/authentication"`,
+		`title="INVENIO_OIDC_ISSUER"`,
+		"description=`OpenID Connect issuer URL for authentication.`",
+		`descriptionLink="https://auth-wiki.logto.io/openid-connect-discovery"`,
+	}
+	for _, check := range checks {
+		if !strings.Contains(content, check) {
+			t.Fatalf("expected generated set markdown to contain %q, got:\n%s", check, content)
+		}
+	}
+}
+
 func TestHasFlag(t *testing.T) {
 	args := []string{"--destination", "public", "--cleanDestinationDir", "--baseURL=https://example.org"}
 	if !hasFlag(args, "--cleanDestinationDir") {

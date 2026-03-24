@@ -627,6 +627,8 @@ func TestDecodeVarsSequenceFormat(t *testing.T) {
 		"  vars:",
 		"    - key: DATABASE_URL",
 		"      default: postgres://localhost/app",
+		"      description: Database connection URL",
+		"      link: https://example.org/database-url",
 	}, "\n")
 
 	var m Project
@@ -637,6 +639,12 @@ func TestDecodeVarsSequenceFormat(t *testing.T) {
 	if got := VarString(m.Sets["app"].Vars()["DATABASE_URL"]); got != "postgres://localhost/app" {
 		t.Fatalf("expected DATABASE_URL default, got %q", got)
 	}
+	if got := m.Sets["app"].VarDescription("DATABASE_URL"); got != "Database connection URL" {
+		t.Fatalf("expected DATABASE_URL description, got %q", got)
+	}
+	if got := m.Sets["app"].VarLink("DATABASE_URL"); got != "https://example.org/database-url" {
+		t.Fatalf("expected DATABASE_URL link, got %q", got)
+	}
 }
 
 func TestDecodeVarsMappingFormat(t *testing.T) {
@@ -645,6 +653,7 @@ func TestDecodeVarsMappingFormat(t *testing.T) {
 		"  title: Example",
 		"x-set-app: &app",
 		"  vars:",
+		"    # Redis cache endpoint",
 		"    CACHE_URL:",
 		"      default: redis://localhost:6379",
 	}, "\n")
@@ -656,6 +665,60 @@ func TestDecodeVarsMappingFormat(t *testing.T) {
 
 	if got := VarString(m.Sets["app"].Vars()["CACHE_URL"]); got != "redis://localhost:6379" {
 		t.Fatalf("expected CACHE_URL default, got %q", got)
+	}
+	if got := m.Sets["app"].VarDescription("CACHE_URL"); got != "Redis cache endpoint" {
+		t.Fatalf("expected CACHE_URL description from comment, got %q", got)
+	}
+}
+
+func TestDecodeVarsMappingFormatIgnoresLinkOnlyCommentLines(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-authentication: &authentication",
+		"  vars:",
+		"    # OpenID Connect issuer URL for authentication.",
+		"    # Link: https://auth-wiki.logto.io/openid-connect-discovery",
+		"    INVENIO_OIDC_ISSUER:",
+		"      default: \"\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if got := m.Sets["authentication"].VarDescription("INVENIO_OIDC_ISSUER"); got != "OpenID Connect issuer URL for authentication." {
+		t.Fatalf("expected description without Link line, got %q", got)
+	}
+	if got := m.Sets["authentication"].VarLink("INVENIO_OIDC_ISSUER"); got != "https://auth-wiki.logto.io/openid-connect-discovery" {
+		t.Fatalf("expected link from Link comment line, got %q", got)
+	}
+}
+
+func TestDecodeDirectSetVarCommentsIncludeDescriptionAndLink(t *testing.T) {
+	input := strings.Join([]string{
+		"x-envy:",
+		"  title: Example",
+		"x-set-authentication: &authentication",
+		"  # OpenID Connect issuer URL for authentication.",
+		"  # Link: https://auth-wiki.logto.io/openid-connect-discovery",
+		"  INVENIO_OIDC_ISSUER: \"${INVENIO_OIDC_ISSUER:-}\"",
+	}, "\n")
+
+	var m Project
+	if err := yaml.Unmarshal([]byte(input), &m); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+
+	if got := VarString(m.Sets["authentication"].Vars()["INVENIO_OIDC_ISSUER"]); got != "" {
+		t.Fatalf("expected parsed default value to be empty string, got %q", got)
+	}
+	if got := m.Sets["authentication"].VarDescription("INVENIO_OIDC_ISSUER"); got != "OpenID Connect issuer URL for authentication." {
+		t.Fatalf("expected description from direct var comments, got %q", got)
+	}
+	if got := m.Sets["authentication"].VarLink("INVENIO_OIDC_ISSUER"); got != "https://auth-wiki.logto.io/openid-connect-discovery" {
+		t.Fatalf("expected link from direct var comments, got %q", got)
 	}
 }
 

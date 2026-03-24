@@ -149,6 +149,8 @@ type serviceYAML struct {
 type Set types.MappingWithEquals
 
 const setInternalPrefix = "__envy_set."
+const setVarDescriptionPrefix = setInternalPrefix + "var_description."
+const setVarLinkPrefix = setInternalPrefix + "var_link."
 
 func setMetadataKey(name string) string {
 	return setInternalPrefix + name
@@ -156,6 +158,14 @@ func setMetadataKey(name string) string {
 
 func setVarsStorageKey() string {
 	return setInternalPrefix + "vars"
+}
+
+func setVarDescriptionKey(name string) string {
+	return setVarDescriptionPrefix + strings.TrimSpace(name)
+}
+
+func setVarLinkKey(name string) string {
+	return setVarLinkPrefix + strings.TrimSpace(name)
 }
 
 // Var aligns with compose-go's MappingWithEquals value type.
@@ -642,6 +652,12 @@ func (s *Set) delete(key string) {
 func (s Set) Key() string         { return s.get(setMetadataKey("key")) }
 func (s Set) Description() string { return s.get(setMetadataKey("description")) }
 func (s Set) Link() string        { return s.get(setMetadataKey("link")) }
+func (s Set) VarDescription(name string) string {
+	return s.get(setVarDescriptionKey(name))
+}
+func (s Set) VarLink(name string) string {
+	return s.get(setVarLinkKey(name))
+}
 func (s Set) Vars() types.MappingWithEquals {
 	m := types.MappingWithEquals(s)
 	if m == nil {
@@ -674,6 +690,31 @@ func (s Set) Vars() types.MappingWithEquals {
 func (s *Set) SetKey(value string)         { s.set(setMetadataKey("key"), value) }
 func (s *Set) SetDescription(value string) { s.set(setMetadataKey("description"), value) }
 func (s *Set) SetLink(value string)        { s.set(setMetadataKey("link"), value) }
+func (s *Set) SetVarDescription(name, value string) {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return
+	}
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		s.delete(setVarDescriptionKey(trimmedName))
+		return
+	}
+	s.set(setVarDescriptionKey(trimmedName), trimmedValue)
+}
+
+func (s *Set) SetVarLink(name, value string) {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return
+	}
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		s.delete(setVarLinkKey(trimmedName))
+		return
+	}
+	s.set(setVarLinkKey(trimmedName), trimmedValue)
+}
 func (s *Set) SetVars(vars types.MappingWithEquals) {
 	m := s.ensureMap()
 	for key := range m {
@@ -922,11 +963,17 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 			}
 			out.SetLink(link)
 		case "vars":
-			vars, err := decodeVarsNode(value)
+			vars, varDescriptions, varLinks, err := decodeVarsNode(value)
 			if err != nil {
 				return out, err
 			}
 			out.SetVars(vars)
+			for key, description := range varDescriptions {
+				out.SetVarDescription(key, description)
+			}
+			for key, link := range varLinks {
+				out.SetVarLink(key, link)
+			}
 		default:
 			vars := out.Vars()
 			if vars == nil {
@@ -939,6 +986,24 @@ func decodeSetNode(node *yaml.Node) (Set, error) {
 			v := defaultValue
 			vars[key] = &v
 			out.SetVars(vars)
+
+			description := decodeVarDescription(value)
+			link := decodeVarLink(value)
+			if description == "" || link == "" {
+				commentDescription, commentLink := extractVarMetadataFromComments(node, node.Content[i], value)
+				if description == "" {
+					description = commentDescription
+				}
+				if link == "" {
+					link = commentLink
+				}
+			}
+			if description != "" {
+				out.SetVarDescription(key, description)
+			}
+			if link != "" {
+				out.SetVarLink(key, link)
+			}
 		}
 	}
 	return out, nil
@@ -1113,14 +1178,16 @@ func decodeServiceEnvironmentSetRefs(node *yaml.Node) ([]string, error) {
 	return sets, nil
 }
 
-func decodeVarsNode(node *yaml.Node) (types.MappingWithEquals, error) {
+func decodeVarsNode(node *yaml.Node) (types.MappingWithEquals, map[string]string, map[string]string, error) {
 	switch node.Kind {
 	case yaml.SequenceNode:
 		vars := types.MappingWithEquals{}
+		varDescriptions := map[string]string{}
+		varLinks := map[string]string{}
 		for _, item := range node.Content {
 			var decoded map[string]string
 			if err := item.Decode(&decoded); err != nil {
-				return nil, err
+				return nil, nil, nil, err
 			}
 			key := strings.TrimSpace(decoded["key"])
 			if key == "" {
@@ -1128,23 +1195,143 @@ func decodeVarsNode(node *yaml.Node) (types.MappingWithEquals, error) {
 			}
 			v := parseComposeDefaultSyntax(decoded["default"])
 			vars[key] = &v
+
+			description := strings.TrimSpace(decoded["description"])
+			link := strings.TrimSpace(decoded["link"])
+			if description == "" || link == "" {
+				commentDescription, commentLink := extractVarMetadataFromComments(node, item)
+				if description == "" {
+					description = commentDescription
+				}
+				if link == "" {
+					link = commentLink
+				}
+			}
+			if description != "" {
+				varDescriptions[key] = description
+			}
+			if link != "" {
+				varLinks[key] = link
+			}
 		}
-		return vars, nil
+		return vars, varDescriptions, varLinks, nil
 	case yaml.MappingNode:
 		vars := types.MappingWithEquals{}
+		varDescriptions := map[string]string{}
+		varLinks := map[string]string{}
 		for i := 0; i < len(node.Content); i += 2 {
 			key := node.Content[i].Value
 			defaultValue, err := decodeVarDefault(node.Content[i+1])
 			if err != nil {
-				return nil, err
+				return nil, nil, nil, err
 			}
 			v := defaultValue
 			vars[key] = &v
+
+			description := decodeVarDescription(node.Content[i+1])
+			link := decodeVarLink(node.Content[i+1])
+			if description == "" || link == "" {
+				commentDescription, commentLink := extractVarMetadataFromComments(node, node.Content[i], node.Content[i+1])
+				if description == "" {
+					description = commentDescription
+				}
+				if link == "" {
+					link = commentLink
+				}
+			}
+			if description != "" {
+				varDescriptions[key] = description
+			}
+			if link != "" {
+				varLinks[key] = link
+			}
 		}
-		return vars, nil
+		return vars, varDescriptions, varLinks, nil
 	default:
-		return nil, fmt.Errorf("expected vars sequence or mapping, got YAML kind %d", node.Kind)
+		return nil, nil, nil, fmt.Errorf("expected vars sequence or mapping, got YAML kind %d", node.Kind)
 	}
+}
+
+func decodeVarDescription(node *yaml.Node) string {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value != "description" {
+			continue
+		}
+		var description string
+		if err := node.Content[i+1].Decode(&description); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(description)
+	}
+	return ""
+}
+
+func decodeVarLink(node *yaml.Node) string {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return ""
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value != "link" {
+			continue
+		}
+		var link string
+		if err := node.Content[i+1].Decode(&link); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(link)
+	}
+	return ""
+}
+
+func parseVarDescriptionFromComments(comments ...string) string {
+	var descriptionParts []string
+
+	for _, raw := range comments {
+		for _, line := range strings.Split(raw, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			clean := cleanComment(trimmed)
+			if clean == "" {
+				continue
+			}
+			if isSetCommentLinkOnlyLine(clean) {
+				continue
+			}
+			descriptionParts = append(descriptionParts, clean)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(descriptionParts, " "))
+}
+
+func extractVarMetadataFromComments(container *yaml.Node, nodes ...*yaml.Node) (string, string) {
+	comments := make([]string, 0, len(nodes)*3)
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		comments = append(comments, n.HeadComment, n.LineComment, n.FootComment)
+	}
+
+	if container != nil && container.Kind == yaml.MappingNode && len(nodes) >= 1 {
+		keyNode := nodes[0]
+		for i := 0; i < len(container.Content); i += 2 {
+			if container.Content[i] != keyNode {
+				continue
+			}
+			if i >= 2 {
+				comments = append([]string{container.Content[i-1].FootComment}, comments...)
+			}
+			break
+		}
+	}
+
+	return parseSetMetadataFromComments(comments...)
 }
 
 func decodeVarDefault(node *yaml.Node) (string, error) {

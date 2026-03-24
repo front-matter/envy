@@ -3681,7 +3681,12 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 		return body.String()
 	}
 	for _, key := range compose.SortedVarKeys(set.Vars()) {
-		variable := hugoVar{Key: key, Value: set.Vars()[key]}
+		variable := hugoVar{
+			Key:         key,
+			Value:       set.Vars()[key],
+			Description: set.VarDescription(key),
+			Link:        set.VarLink(key),
+		}
 		body.WriteString(fmt.Sprintf("<div id=\"%s\"></div>\n\n", variableHeadingAnchor(variable.Key)))
 		body.WriteString(renderCardsOpen(1))
 		body.WriteString(renderVarCard(variable, variableCardSubtitle(variable, language), variableCardClass(variable), true, language))
@@ -4005,25 +4010,32 @@ func profileWeight(m *compose.Project, profileName string) int {
 }
 
 type hugoVar struct {
-	Key   string
-	Value *string
+	Key         string
+	Value       *string
+	Description string
+	Link        string
 }
 
 func varsForServiceSorted(m *compose.Project, service compose.Service) []hugoVar {
-	byKey := make(map[string]*string)
+	byKey := make(map[string]hugoVar)
 	for _, setKey := range service.Sets {
 		set, ok := m.Sets[setKey]
 		if !ok {
 			continue
 		}
 		for key, value := range set.Vars() {
-			byKey[key] = value
+			byKey[key] = hugoVar{
+				Key:         key,
+				Value:       value,
+				Description: set.VarDescription(key),
+				Link:        set.VarLink(key),
+			}
 		}
 	}
 
 	vars := make([]hugoVar, 0, len(byKey))
-	for key, value := range byKey {
-		vars = append(vars, hugoVar{Key: key, Value: value})
+	for _, variable := range byKey {
+		vars = append(vars, variable)
 	}
 
 	sort.SliceStable(vars, func(i, j int) bool {
@@ -4311,6 +4323,10 @@ func renderVarCard(variable hugoVar, description, class string, showQuestionPref
 	if strings.TrimSpace(description) != "" {
 		sb.WriteString(fmt.Sprintf(" description=`%s`", escapeShortcodeRawValue(description)))
 	}
+	if strings.TrimSpace(variable.Link) != "" {
+		_, linkTarget := normalizeSetDocLink(variable.Link)
+		sb.WriteString(fmt.Sprintf(" descriptionLink=\"%s\"", escapeShortcodeValue(linkTarget)))
+	}
 	defaultValue := strings.TrimSpace(compose.VarString(variable.Value))
 	hasQuestionPrefix := showQuestionPrefixAsRequired && strings.HasPrefix(defaultValue, "?")
 	if hasQuestionPrefix {
@@ -4343,6 +4359,10 @@ func variableCardClass(variable hugoVar) string {
 func variableCardSubtitle(variable hugoVar, language string) string {
 	parts := make([]string, 0, 5)
 	_ = language
+
+	if strings.TrimSpace(variable.Description) != "" {
+		parts = append(parts, strings.TrimSpace(variable.Description))
+	}
 
 	defaultValue := strings.TrimSpace(compose.VarString(variable.Value))
 	if len(parts) == 0 {

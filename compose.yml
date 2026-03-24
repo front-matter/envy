@@ -22,6 +22,8 @@ x-set-base: &base
     TEST_HARDCODED_VAR: "locked-value"
     # TEST_REQUIRED_VAR is a required test variable and must be provided.
     TEST_REQUIRED_VAR: "${TEST_REQUIRED_VAR:-?required-value}"
+# Authentication defines authentication and account-security configuration.
+# Link: https://auth-wiki.logto.io/openid-connect-discovery
 x-set-authentication: &authentication
     INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY: "${INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY:-restricted}"
     INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED: "${INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED:-false}"
