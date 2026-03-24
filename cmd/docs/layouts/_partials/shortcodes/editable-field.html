@@ -11,18 +11,27 @@
 {{- $ariaLabel := .ariaLabel | default (printf "Edit %s" $field) -}}
 {{- $rows := .rows | default 1 -}}
 {{- $emptyDisplay := .emptyDisplay | default "-" -}}
+{{- $displayLabel := .displayLabel | default "" -}}
+{{- $displayText := .displayText | default "" -}}
+{{- $displayIcon := .displayIcon | default "" -}}
+{{- $editGroup := .editGroup | default "" -}}
+{{- $triggerGroupEdit := .triggerGroupEdit | default false -}}
+{{- $listenGroupDelete := .listenGroupDelete | default false -}}
+{{- $closeGroupOnExit := .closeGroupOnExit | default false -}}
+{{- $blurCancels := .blurCancels | default true -}}
 {{- $deleteOnEmptySubmit := .deleteOnEmptySubmit | default false -}}
 {{- $deleteEntityLabel := .deleteEntityLabel | default "item" -}}
 {{- $deleteApiBase := .deleteApiBase | default "" -}}
 {{- $deleteSection := .deleteSection | default "" -}}
 {{- $deleteUseAlpineModal := .deleteUseAlpineModal | default false -}}
+{{- $deleteWithFormSubmit := .deleteWithFormSubmit | default false -}}
 
 {{- if $apiPath -}}
 <div class="{{ $wrapperClass }}">
   <form
     id="{{ $fieldID }}-form"
     class="hx:space-y-2"
-    x-data='envyEditor({"initialValue": {{ $initialValue | jsonify }}, "field": {{ $field | jsonify }}, "deleteOnEmptySubmit": {{ $deleteOnEmptySubmit | jsonify }}, "deleteEntityLabel": {{ $deleteEntityLabel | jsonify }}, "deleteApiBase": {{ $deleteApiBase | jsonify }}, "deleteSection": {{ $deleteSection | jsonify }}, "deleteUseAlpineModal": {{ $deleteUseAlpineModal | jsonify }}})'
+    x-data='envyEditor({"initialValue": {{ $initialValue | jsonify }}, "field": {{ $field | jsonify }}, "editorId": {{ $fieldID | jsonify }}, "editGroup": {{ $editGroup | jsonify }}, "closeGroupOnExit": {{ $closeGroupOnExit | jsonify }}, "blurCancels": {{ $blurCancels | jsonify }}, "deleteOnEmptySubmit": {{ $deleteOnEmptySubmit | jsonify }}, "deleteEntityLabel": {{ $deleteEntityLabel | jsonify }}, "deleteApiBase": {{ $deleteApiBase | jsonify }}, "deleteSection": {{ $deleteSection | jsonify }}, "deleteUseAlpineModal": {{ $deleteUseAlpineModal | jsonify }}, "deleteWithFormSubmit": {{ $deleteWithFormSubmit | jsonify }}})'
     x-ref="form"
     hx-post="{{ $apiPath }}"
     hx-swap="none"
@@ -32,6 +41,13 @@
     {{- if $key -}}
       <input type="hidden" name="key" value="{{ $key }}"{{ if $bindKeyToDisplay }} x-bind:value="displayValue"{{ end }} />
     {{- end -}}
+    {{- if $editGroup -}}
+      <div x-on:envy-edit-group.window='if ($event.detail && $event.detail.group === {{ $editGroup | jsonify }}) enterEdit(false)'></div>
+      <div x-on:envy-close-group.window='if ($event.detail && $event.detail.group === {{ $editGroup | jsonify }} && $event.detail.source !== {{ $fieldID | jsonify }}) cancelEdit(false)'></div>
+      {{- if $listenGroupDelete -}}
+        <div x-on:envy-delete-group.window='if ($event.detail && $event.detail.group === {{ $editGroup | jsonify }}) { {{ if $deleteUseAlpineModal }}openDeleteModal(){{ else }}submitDelete(){{ end }} }'></div>
+      {{- end -}}
+    {{- end -}}
     <div
       id="{{ $fieldID }}-display"
       class="{{ $displayClass }}"
@@ -40,12 +56,29 @@
       aria-label="{{ $ariaLabel }}"
       x-bind:class="flashClasses()"
       x-show="!isEditing"
+      {{- if and $triggerGroupEdit $editGroup -}}
+      x-on:click='enterEdit(); window.dispatchEvent(new CustomEvent("envy-edit-group", { detail: { group: {{ $editGroup | jsonify }} } }))'
+      x-on:keydown.enter.prevent='enterEdit(); window.dispatchEvent(new CustomEvent("envy-edit-group", { detail: { group: {{ $editGroup | jsonify }} } }))'
+      x-on:keydown.space.prevent='enterEdit(); window.dispatchEvent(new CustomEvent("envy-edit-group", { detail: { group: {{ $editGroup | jsonify }} } }))'
+      {{- else -}}
       x-on:click="enterEdit()"
       x-on:keydown.enter.prevent="enterEdit()"
       x-on:keydown.space.prevent="enterEdit()"
-      x-text="displayValue || {{ $emptyDisplay | jsonify }}"
-    ></div>
-    <div id="{{ $fieldID }}-editor" x-show="isEditing">
+      {{- end -}}
+    >
+      {{- if $displayIcon -}}
+        <span class="hx:inline-flex hx:items-center hx:gap-2 hx:font-semibold hx:text-blue-700 hx:dark:text-blue-300">
+          {{- partial "utils/icon.html" (dict "name" $displayIcon) -}}
+          <span>{{ $displayText | default $emptyDisplay }}</span>
+        </span>
+      {{- else if $displayLabel -}}
+        <span class="hx:font-semibold">{{ $displayLabel }}</span>
+        <span x-text="' ' + (displayValue || {{ $emptyDisplay | jsonify }})"></span>
+      {{- else -}}
+        <span x-text="displayValue || {{ $emptyDisplay | jsonify }}"></span>
+      {{- end -}}
+    </div>
+    <div id="{{ $fieldID }}-editor" style="display: none;" x-show="isEditing && !isDeleteModalOpen">
       <textarea
         id="{{ $fieldID }}-value"
         name="value"
@@ -64,8 +97,8 @@
       <template x-if="isDeleteModalOpen">
         <div class="hx:fixed hx:inset-0 hx:z-50 hx:flex hx:items-center hx:justify-center hx:bg-black/50 hx:p-4" x-on:click.self="closeDeleteModal()" x-on:keydown.escape.window="closeDeleteModal()">
           <div class="hx:w-full hx:max-w-md hx:rounded-lg hx:bg-white hx:p-6 hx:shadow-xl hx:dark:bg-neutral-900 hx:dark:text-neutral-100">
-            <h3 class="hx:text-lg hx:font-semibold" x-text="`Delete this {{ $deleteEntityLabel }}?`"></h3>
-            <p class="hx:mt-3 hx:text-sm hx:text-gray-600 hx:dark:text-gray-300" x-text='`This will permanently remove "${(displayValue || "").trim()}". This action cannot be undone.`'></p>
+            <h3 class="hx:text-lg hx:font-semibold" x-text="deletePromptTitle()"></h3>
+            <p class="hx:mt-3 hx:text-sm hx:text-gray-600 hx:dark:text-gray-300" x-text='`This will permanently remove "${deleteTargetName()}". This action cannot be undone.`'></p>
             <div class="hx:mt-6 hx:flex hx:justify-end hx:gap-3">
               <button type="button" class="hx:rounded-md hx:border hx:border-gray-300 hx:px-3 hx:py-2 hx:text-sm hx:font-medium hx:text-gray-700 hover:hx:bg-gray-50 hx:dark:border-neutral-700 hx:dark:text-neutral-200 hx:dark:hover:bg-neutral-800" x-ref="cancelBtn" x-init="$nextTick(() => $refs.cancelBtn.focus())" x-on:click="closeDeleteModal()">
                 Cancel

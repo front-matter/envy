@@ -3,20 +3,10 @@ x-envy:
     HUGO_TITLE: Envy
     HUGO_PARAMS_DESCRIPTION: >
         Envy is an environment variable manager for Docker. This website renders the automatic documentation for the compose.yml example file included with the GitHub repo.
-
     HUGO_LANGUAGE_CODE: en-US
     HUGO_IGNORE_LOGS:
         - warning-goldmark-raw-html
     HUGO_MARKUP_GOLDMARK_UNSAFE: "true"
-    HUGO_DEFAULT_CONTENT_LANGUAGE: "en"
-    HUGO_DEFAULT_CONTENT_LANGUAGE_IN_SUBDIR: "false"
-    HUGO_LANGUAGES: |
-        en:
-          languageName: English
-          weight: 1
-        de:
-          languageName: Deutsch
-          weight: 2
 # Base defines shared environment variables for web and worker.
 # Link: https://inveniordm.docs.cern.ch/operate/customize/i18n-and-l10n/
 x-set-base: &base
@@ -32,10 +22,6 @@ x-set-base: &base
     TEST_HARDCODED_VAR: "locked-value"
     # TEST_REQUIRED_VAR is a required test variable and must be provided.
     TEST_REQUIRED_VAR: "${TEST_REQUIRED_VAR:-?required-value}"
-    # TEST_SECRET_VAR is a secret test variable and its value is never exposed.
-    TEST_SECRET_VAR:
-    # Authentication defines authentication configuration.
-    # Link: https://inveniordm.docs.cern.ch/operate/customize/authentication/
 x-set-authentication: &authentication
     INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY: "${INVENIO_ACCOUNTS_DEFAULT_USER_VISIBILITY:-restricted}"
     INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED: "${INVENIO_ACCOUNTS_LOCAL_LOGIN_ENABLED:-false}"
@@ -121,32 +107,32 @@ x-set-web: &web
 services:
     cache:
         image: valkey/valkey:7.2.5-bookworm
-        command: ["valkey-server", "--loglevel", "warning"]
+        command: [ "valkey-server", "--loglevel", "warning" ]
     # Describes db service configuration.
     db:
         image: postgres:17.4-bookworm
-        profiles: [dev, staging]
+        profiles: [ dev, staging ]
         environment:
-            !!merge <<: [*db]
+            !!merge <<: [ *db ]
     # Describes proxy service configuration.
     proxy:
         image: caddy:2.10
-        profiles: [dev, staging]
+        profiles: [ dev, staging ]
     # Describes search service configuration.
     # Link: https://docs.opensearch.org/latest/install-and-configure/install-opensearch/docker/
     search:
         image: opensearchproject/opensearch:2.18.0
         environment:
-            !!merge <<: [*search]
+            !!merge <<: [ *search ]
     # Describes web service configuration.
     web:
         image: ghcr.io/front-matter/invenio-rdm-starter:latest
         platform: linux/amd64
         environment:
-            !!merge <<: [*base, *web, *authentication, *mail, *s3]
+            !!merge <<: [ *base, *web, *authentication, *mail, *s3 ]
     worker:
         image: ghcr.io/front-matter/invenio-rdm-starter:latest
         platform: linux/amd64
-        command: ["celery", "-A", "invenio_app.celery", "worker", "--beat", "--schedule=/tmp/celerybeat-schedule", "--events", "--loglevel=WARNING"]
+        command: [ "celery", "-A", "invenio_app.celery", "worker", "--beat", "--schedule=/tmp/celerybeat-schedule", "--events", "--loglevel=WARNING" ]
         environment:
-            !!merge <<: [*base, *cache, *doi, *mail, *s3]
+            !!merge <<: [ *base, *cache, *doi, *mail, *s3 ]

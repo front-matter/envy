@@ -412,9 +412,45 @@ func editorAPIHandler(manifestPath string) http.HandlerFunc {
 			return
 		}
 
+		field := strings.TrimSpace(r.FormValue("field"))
 		varKey := strings.TrimSpace(r.FormValue("key"))
 		pagePath := strings.TrimSpace(r.FormValue("page"))
 		newValue := r.FormValue("value")
+
+		if field == "create" {
+			if pagePath == "" {
+				if ref := strings.TrimSpace(r.Referer()); ref != "" {
+					if refURL, parseErr := url.Parse(ref); parseErr == nil {
+						pagePath = strings.TrimSpace(refURL.Path)
+					}
+				}
+			}
+
+			setSlug, err := extractSetSlugFromPagePath(pagePath)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			newVarKey := strings.TrimSpace(newValue)
+			if newVarKey == "" {
+				http.Error(w, "variable name cannot be empty", http.StatusBadRequest)
+				return
+			}
+
+			writeMu.Lock()
+			err = addVarToManifest(manifestPath, setSlug, newVarKey)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			w.Header().Set("HX-Trigger", "envyVarSaved")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		if varKey == "" {
 			http.Error(w, "missing key", http.StatusBadRequest)
 			return
@@ -423,6 +459,27 @@ func editorAPIHandler(manifestPath string) http.HandlerFunc {
 		setSlug, err := extractSetSlugFromPagePath(pagePath)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if field == "name" || field == "title" {
+			writeMu.Lock()
+			err = updateVarFieldInManifest(manifestPath, setSlug, varKey, field, newValue)
+			writeMu.Unlock()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			redirectPath := strings.TrimSpace(pagePath)
+			if redirectPath == "" && r.URL != nil {
+				redirectPath = strings.TrimSpace(r.URL.Path)
+			}
+			if redirectPath != "" {
+				w.Header().Set("HX-Redirect", redirectPath)
+			}
+			w.Header().Set("HX-Trigger", "envyVarSaved")
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 
@@ -578,7 +635,7 @@ func serviceIndexPagePath(pagePath string) string {
 }
 
 // setAPIHandler creates, updates, or deletes sets in compose.yml.
-// Supported fields via POST: create, name, title, description, link.
+// Supported fields via POST: create, name, title, description, link, services.
 // DELETE /api/sets/{slug}: deletes a set and all set alias references.
 func setAPIHandler(manifestPath string, afterWrite ...func() error) http.HandlerFunc {
 	var writeMu sync.Mutex
@@ -949,6 +1006,18 @@ func updateVarDefaultInManifest(manifestPath, setSlug, varKey, newValue string) 
 	})
 }
 
+func updateVarFieldInManifest(manifestPath, setSlug, varKey, field, newValue string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyVarFieldUpdateToManifestNode(document, setSlug, varKey, field, newValue)
+	})
+}
+
+func addVarToManifest(manifestPath, setSlug, varKey string) error {
+	return updateManifest(manifestPath, func(document *yaml.Node) error {
+		return applyVarCreateToManifestNode(document, setSlug, varKey)
+	})
+}
+
 func updateServiceFieldInManifest(manifestPath, serviceSlug, field, newValue string) error {
 	return updateManifest(manifestPath, func(document *yaml.Node) error {
 		return applyServiceFieldUpdateToManifestNode(document, serviceSlug, field, newValue)
@@ -1159,6 +1228,10 @@ func applySetFieldUpdateToManifestNode(document *yaml.Node, setSlug, field, newV
 		return err
 	}
 
+	if strings.TrimSpace(field) == "services" {
+		return updateServicesForSetInManifestNode(root, setSlug, newValue)
+	}
+
 	for i := 0; i < len(root.Content); i += 2 {
 		keyNode := root.Content[i]
 		valueNode := root.Content[i+1]
@@ -1215,6 +1288,223 @@ func applySetFieldUpdateToManifestNode(document *yaml.Node, setSlug, field, newV
 	}
 
 	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func updateServicesForSetInManifestNode(root *yaml.Node, setSlug, newValue string) error {
+	if root == nil || root.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest root must be a mapping")
+	}
+
+	setAnchor, err := setAnchorBySlug(root, setSlug)
+	if err != nil {
+		return err
+	}
+
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest has no services mapping")
+	}
+
+	targetServiceSlugs := parseServiceSlugList(newValue)
+	knownServiceSlugs := make(map[string]struct{}, len(servicesNode.Content)/2)
+
+	for i := 0; i < len(servicesNode.Content); i += 2 {
+		serviceKeyNode := servicesNode.Content[i]
+		serviceValueNode := servicesNode.Content[i+1]
+		serviceSlug := sanitizeServicePageName(serviceKeyNode.Value)
+		knownServiceSlugs[serviceSlug] = struct{}{}
+
+		_, shouldContainSet := targetServiceSlugs[serviceSlug]
+		hasSet := serviceContainsSetAlias(serviceValueNode, setAnchor)
+
+		if shouldContainSet && !hasSet {
+			if err := addSetAliasToService(serviceValueNode, setAnchor); err != nil {
+				return fmt.Errorf("adding set alias to service %q: %w", serviceKeyNode.Value, err)
+			}
+		}
+
+		if !shouldContainSet && hasSet {
+			if err := removeSetAliasFromService(serviceValueNode, setAnchor); err != nil {
+				return fmt.Errorf("removing set alias from service %q: %w", serviceKeyNode.Value, err)
+			}
+		}
+	}
+
+	for requestedSlug := range targetServiceSlugs {
+		if _, ok := knownServiceSlugs[requestedSlug]; !ok {
+			return fmt.Errorf("service %q not found in compose manifest", requestedSlug)
+		}
+	}
+
+	return nil
+}
+
+func setAnchorBySlug(root *yaml.Node, setSlug string) (string, error) {
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+		if !strings.HasPrefix(keyNode.Value, "x-set-") {
+			continue
+		}
+
+		setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+		if sanitizeSetPageName(setKey) != setSlug {
+			continue
+		}
+
+		if trimmedAnchor := strings.TrimSpace(valueNode.Anchor); trimmedAnchor != "" {
+			return trimmedAnchor, nil
+		}
+
+		trimmedKey := strings.TrimSpace(setKey)
+		if trimmedKey == "" {
+			return "", fmt.Errorf("set %q has no usable anchor", setSlug)
+		}
+		return trimmedKey, nil
+	}
+
+	return "", fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func parseServiceSlugList(value string) map[string]struct{} {
+	result := map[string]struct{}{}
+	for _, part := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		result[sanitizeServicePageName(trimmed)] = struct{}{}
+	}
+	return result
+}
+
+func serviceContainsSetAlias(serviceNode *yaml.Node, setAnchor string) bool {
+	if serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+		return false
+	}
+
+	environmentNode := mappingValueNode(serviceNode, "environment")
+	if environmentNode == nil || environmentNode.Kind != yaml.MappingNode {
+		return false
+	}
+
+	mergeNode := mappingValueNode(environmentNode, "<<")
+	if mergeNode == nil {
+		return false
+	}
+
+	if aliasMatchesAnchor(mergeNode, setAnchor) {
+		return true
+	}
+
+	if mergeNode.Kind == yaml.SequenceNode {
+		for _, child := range mergeNode.Content {
+			if aliasMatchesAnchor(child, setAnchor) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func addSetAliasToService(serviceNode *yaml.Node, setAnchor string) error {
+	if serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("service node is not a mapping")
+	}
+
+	environmentNode := mappingValueNode(serviceNode, "environment")
+	if environmentNode == nil {
+		environmentNode = &yaml.Node{Kind: yaml.MappingNode}
+		serviceNode.Content = append(serviceNode.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "environment"},
+			environmentNode,
+		)
+	}
+
+	if environmentNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("service environment is not a mapping")
+	}
+
+	mergeNode := mappingValueNode(environmentNode, "<<")
+	if mergeNode == nil {
+		environmentNode.Content = append(environmentNode.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "<<"},
+			&yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{newAliasNode(setAnchor)}},
+		)
+		return nil
+	}
+
+	if aliasMatchesAnchor(mergeNode, setAnchor) {
+		return nil
+	}
+
+	switch mergeNode.Kind {
+	case yaml.AliasNode:
+		existing := &yaml.Node{Kind: yaml.AliasNode, Value: mergeNode.Value, Alias: mergeNode.Alias}
+		mergeNode.Kind = yaml.SequenceNode
+		mergeNode.Value = ""
+		mergeNode.Alias = nil
+		mergeNode.Content = []*yaml.Node{existing, newAliasNode(setAnchor)}
+		return nil
+	case yaml.SequenceNode:
+		for _, child := range mergeNode.Content {
+			if aliasMatchesAnchor(child, setAnchor) {
+				return nil
+			}
+		}
+		mergeNode.Content = append(mergeNode.Content, newAliasNode(setAnchor))
+		return nil
+	default:
+		return fmt.Errorf("service environment merge key is not an alias or sequence")
+	}
+}
+
+func removeSetAliasFromService(serviceNode *yaml.Node, setAnchor string) error {
+	if serviceNode == nil || serviceNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("service node is not a mapping")
+	}
+
+	environmentNode := mappingValueNode(serviceNode, "environment")
+	if environmentNode == nil || environmentNode.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	for i := 0; i < len(environmentNode.Content); i += 2 {
+		keyNode := environmentNode.Content[i]
+		valueNode := environmentNode.Content[i+1]
+		if keyNode.Value != "<<" {
+			continue
+		}
+
+		if aliasMatchesAnchor(valueNode, setAnchor) {
+			environmentNode.Content = append(environmentNode.Content[:i], environmentNode.Content[i+2:]...)
+			return nil
+		}
+
+		if valueNode.Kind == yaml.SequenceNode {
+			filtered := valueNode.Content[:0]
+			for _, child := range valueNode.Content {
+				if aliasMatchesAnchor(child, setAnchor) {
+					continue
+				}
+				filtered = append(filtered, child)
+			}
+			valueNode.Content = filtered
+			if len(valueNode.Content) == 0 {
+				environmentNode.Content = append(environmentNode.Content[:i], environmentNode.Content[i+2:]...)
+			}
+			return nil
+		}
+
+		return nil
+	}
+
+	return nil
+}
+
+func newAliasNode(anchor string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.AliasNode, Value: strings.TrimSpace(anchor)}
 }
 
 func ensureUniqueSetSlug(root *yaml.Node, currentKeyIndex int, newValue string) error {
@@ -1877,6 +2167,402 @@ func applyVarUpdateToManifestNode(document *yaml.Node, setSlug, varKey, newValue
 	return fmt.Errorf("set %q not found in compose manifest", setSlug)
 }
 
+func applyVarCreateToManifestNode(document *yaml.Node, setSlug, varKey string) error {
+	if document == nil || len(document.Content) == 0 {
+		return fmt.Errorf("compose manifest is empty")
+	}
+
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest root must be a mapping")
+	}
+
+	trimmedVarKey := strings.TrimSpace(varKey)
+	if trimmedVarKey == "" {
+		return fmt.Errorf("variable name cannot be empty")
+	}
+
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(setKey) != setSlug {
+				continue
+			}
+			return addVarToSetNode(valueNode, trimmedVarKey)
+		}
+
+		if keyNode.Value == "sets" && valueNode.Kind == yaml.MappingNode {
+			for j := 0; j < len(valueNode.Content); j += 2 {
+				setKeyNode := valueNode.Content[j]
+				setValueNode := valueNode.Content[j+1]
+				if sanitizeSetPageName(setKeyNode.Value) != setSlug {
+					continue
+				}
+				return addVarToSetNode(setValueNode, trimmedVarKey)
+			}
+		}
+	}
+
+	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func applyVarFieldUpdateToManifestNode(document *yaml.Node, setSlug, varKey, field, newValue string) error {
+	if strings.TrimSpace(field) != "name" && strings.TrimSpace(field) != "title" {
+		return fmt.Errorf("unsupported variable field %q", field)
+	}
+
+	if document == nil || len(document.Content) == 0 {
+		return fmt.Errorf("compose manifest is empty")
+	}
+
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return fmt.Errorf("compose manifest root must be a mapping")
+	}
+
+	for i := 0; i < len(root.Content); i += 2 {
+		keyNode := root.Content[i]
+		valueNode := root.Content[i+1]
+
+		if strings.HasPrefix(keyNode.Value, "x-set-") {
+			setKey := strings.TrimPrefix(keyNode.Value, "x-set-")
+			if sanitizeSetPageName(setKey) != setSlug {
+				continue
+			}
+			updated, err := renameOrDeleteVarInSetNode(valueNode, varKey, newValue)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return fmt.Errorf("variable %q not found in set %q", varKey, setKey)
+			}
+			return nil
+		}
+
+		if keyNode.Value == "sets" && valueNode.Kind == yaml.MappingNode {
+			for j := 0; j < len(valueNode.Content); j += 2 {
+				setKeyNode := valueNode.Content[j]
+				setValueNode := valueNode.Content[j+1]
+				if sanitizeSetPageName(setKeyNode.Value) != setSlug {
+					continue
+				}
+				updated, err := renameOrDeleteVarInSetNode(setValueNode, varKey, newValue)
+				if err != nil {
+					return err
+				}
+				if !updated {
+					return fmt.Errorf("variable %q not found in set %q", varKey, setKeyNode.Value)
+				}
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("set %q not found in compose manifest", setSlug)
+}
+
+func renameOrDeleteVarInSetNode(setNode *yaml.Node, oldKey, newValue string) (bool, error) {
+	if setNode == nil || setNode.Kind != yaml.MappingNode {
+		return false, fmt.Errorf("set node is not a mapping")
+	}
+
+	newKey := strings.TrimSpace(newValue)
+	deleteVar := newKey == ""
+
+	for i := 0; i < len(setNode.Content); i += 2 {
+		keyNode := setNode.Content[i]
+		valueNode := setNode.Content[i+1]
+
+		if keyNode.Value == "vars" {
+			if !deleteVar && oldKey != newKey && setNodeHasVarKey(setNode, newKey, oldKey) {
+				return false, fmt.Errorf("variable %q already exists", newKey)
+			}
+			return renameOrDeleteVarInVarsNode(valueNode, oldKey, newKey)
+		}
+
+		if keyNode.Value == "description" || keyNode.Value == "link" {
+			continue
+		}
+
+		if keyNode.Value != oldKey {
+			continue
+		}
+
+		if deleteVar {
+			setNode.Content = append(setNode.Content[:i], setNode.Content[i+2:]...)
+			return true, nil
+		}
+
+		if oldKey == newKey {
+			return true, nil
+		}
+
+		if setNodeHasVarKey(setNode, newKey, oldKey) {
+			return false, fmt.Errorf("variable %q already exists", newKey)
+		}
+
+		keyNode.Value = newKey
+		renameVarReferenceInValueNode(valueNode, oldKey, newKey)
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func renameOrDeleteVarInVarsNode(varsNode *yaml.Node, oldKey, newKey string) (bool, error) {
+	if varsNode == nil {
+		return false, nil
+	}
+
+	switch varsNode.Kind {
+	case yaml.MappingNode:
+		for i := 0; i < len(varsNode.Content); i += 2 {
+			if varsNode.Content[i].Value != oldKey {
+				continue
+			}
+
+			if newKey == "" {
+				varsNode.Content = append(varsNode.Content[:i], varsNode.Content[i+2:]...)
+				return true, nil
+			}
+
+			if oldKey == newKey {
+				return true, nil
+			}
+
+			for j := 0; j < len(varsNode.Content); j += 2 {
+				if j == i {
+					continue
+				}
+				if varsNode.Content[j].Value == newKey {
+					return false, fmt.Errorf("variable %q already exists", newKey)
+				}
+			}
+
+			varsNode.Content[i].Value = newKey
+			renameVarReferenceInValueNode(varsNode.Content[i+1], oldKey, newKey)
+			return true, nil
+		}
+	case yaml.SequenceNode:
+		for i, item := range varsNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+
+			keyValueIndex := -1
+			for j := 0; j < len(item.Content); j += 2 {
+				if item.Content[j].Value == "key" && item.Content[j+1].Value == oldKey {
+					keyValueIndex = j + 1
+					break
+				}
+			}
+			if keyValueIndex == -1 {
+				continue
+			}
+
+			if newKey == "" {
+				varsNode.Content = append(varsNode.Content[:i], varsNode.Content[i+1:]...)
+				return true, nil
+			}
+
+			if oldKey == newKey {
+				return true, nil
+			}
+
+			for k, other := range varsNode.Content {
+				if k == i || other.Kind != yaml.MappingNode {
+					continue
+				}
+				for m := 0; m < len(other.Content); m += 2 {
+					if other.Content[m].Value == "key" && other.Content[m+1].Value == newKey {
+						return false, fmt.Errorf("variable %q already exists", newKey)
+					}
+				}
+			}
+
+			item.Content[keyValueIndex].Value = newKey
+			for j := 0; j < len(item.Content); j += 2 {
+				if item.Content[j].Value == "default" {
+					renameVarReferenceInValueNode(item.Content[j+1], oldKey, newKey)
+					break
+				}
+			}
+			return true, nil
+		}
+	default:
+		return false, fmt.Errorf("vars node must be mapping or sequence")
+	}
+
+	return false, nil
+}
+
+func setNodeHasVarKey(setNode *yaml.Node, candidateKey, excludeKey string) bool {
+	if setNode == nil || setNode.Kind != yaml.MappingNode {
+		return false
+	}
+
+	trimmedCandidate := strings.TrimSpace(candidateKey)
+	trimmedExclude := strings.TrimSpace(excludeKey)
+	if trimmedCandidate == "" {
+		return false
+	}
+
+	for i := 0; i < len(setNode.Content); i += 2 {
+		keyNode := setNode.Content[i]
+		valueNode := setNode.Content[i+1]
+
+		if keyNode.Value == "description" || keyNode.Value == "link" {
+			continue
+		}
+
+		if keyNode.Value == "vars" {
+			switch valueNode.Kind {
+			case yaml.MappingNode:
+				for j := 0; j < len(valueNode.Content); j += 2 {
+					name := strings.TrimSpace(valueNode.Content[j].Value)
+					if name == "" || name == trimmedExclude {
+						continue
+					}
+					if name == trimmedCandidate {
+						return true
+					}
+				}
+			case yaml.SequenceNode:
+				for _, item := range valueNode.Content {
+					if item.Kind != yaml.MappingNode {
+						continue
+					}
+					for j := 0; j < len(item.Content); j += 2 {
+						if item.Content[j].Value != "key" {
+							continue
+						}
+						name := strings.TrimSpace(item.Content[j+1].Value)
+						if name == "" || name == trimmedExclude {
+							continue
+						}
+						if name == trimmedCandidate {
+							return true
+						}
+					}
+				}
+			}
+			continue
+		}
+
+		name := strings.TrimSpace(keyNode.Value)
+		if name == "" || name == trimmedExclude {
+			continue
+		}
+		if name == trimmedCandidate {
+			return true
+		}
+	}
+
+	return false
+}
+
+func renameVarReferenceInValueNode(valueNode *yaml.Node, oldKey, newKey string) {
+	if valueNode == nil {
+		return
+	}
+
+	if valueNode.Kind == yaml.MappingNode {
+		for i := 0; i < len(valueNode.Content); i += 2 {
+			if valueNode.Content[i].Value == "default" {
+				renameVarReferenceInValueNode(valueNode.Content[i+1], oldKey, newKey)
+				return
+			}
+		}
+		return
+	}
+
+	if valueNode.Kind != yaml.ScalarNode {
+		return
+	}
+
+	trimmed := strings.TrimSpace(valueNode.Value)
+	matches := composeInterpolationPatternLocal.FindStringSubmatch(trimmed)
+	if len(matches) == 0 || matches[1] != oldKey {
+		return
+	}
+
+	valueNode.Value = fmt.Sprintf("${%s%s%s}", newKey, matches[2], matches[3])
+}
+
+func addVarToSetNode(setNode *yaml.Node, varKey string) error {
+	if setNode == nil || setNode.Kind != yaml.MappingNode {
+		return fmt.Errorf("set node is not a mapping")
+	}
+
+	for i := 0; i < len(setNode.Content); i += 2 {
+		keyNode := setNode.Content[i]
+		valueNode := setNode.Content[i+1]
+
+		if keyNode.Value == "vars" {
+			return addVarToVarsNode(valueNode, varKey)
+		}
+
+		if keyNode.Value == "description" || keyNode.Value == "link" {
+			continue
+		}
+
+		if keyNode.Value == varKey {
+			return fmt.Errorf("variable %q already exists", varKey)
+		}
+	}
+
+	setNode.Content = append(setNode.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: varKey},
+		&yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: fmt.Sprintf("${%s:-}", varKey)},
+	)
+	return nil
+}
+
+func addVarToVarsNode(varsNode *yaml.Node, varKey string) error {
+	if varsNode == nil {
+		return fmt.Errorf("vars node is missing")
+	}
+
+	switch varsNode.Kind {
+	case yaml.MappingNode:
+		for i := 0; i < len(varsNode.Content); i += 2 {
+			if varsNode.Content[i].Value == varKey {
+				return fmt.Errorf("variable %q already exists", varKey)
+			}
+		}
+		varsNode.Content = append(varsNode.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: varKey},
+			&yaml.Node{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: fmt.Sprintf("${%s:-}", varKey)},
+		)
+		return nil
+	case yaml.SequenceNode:
+		for _, item := range varsNode.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			for i := 0; i < len(item.Content); i += 2 {
+				if item.Content[i].Value == "key" && item.Content[i+1].Value == varKey {
+					return fmt.Errorf("variable %q already exists", varKey)
+				}
+			}
+		}
+		varsNode.Content = append(varsNode.Content,
+			&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Value: "key"},
+				{Kind: yaml.ScalarNode, Value: varKey},
+				{Kind: yaml.ScalarNode, Value: "default"},
+				{Kind: yaml.ScalarNode, Style: yaml.DoubleQuotedStyle, Value: ""},
+			}},
+		)
+		return nil
+	default:
+		return fmt.Errorf("vars node must be mapping or sequence")
+	}
+}
+
 func updateVarInSetNode(setNode *yaml.Node, varKey, newValue string) (bool, error) {
 	if setNode == nil || setNode.Kind != yaml.MappingNode {
 		return false, fmt.Errorf("set node is not a mapping")
@@ -2205,12 +2891,14 @@ func writeTempHugoConfigFromManifest(m *compose.Project, siteDir string, repoURL
 			},
 		},
 	}
-	if strings.TrimSpace(editorAPIURL) != "" {
-		params["envyEditor"] = map[string]interface{}{
-			"enabled": true,
-			"apiURL":  strings.TrimSpace(editorAPIURL),
-		}
+	editorEnabled := strings.TrimSpace(editorAPIURL) != ""
+	envyEditorParams := map[string]interface{}{
+		"enabled": editorEnabled,
 	}
+	if editorEnabled {
+		envyEditorParams["apiURL"] = strings.TrimSpace(editorAPIURL)
+	}
+	params["envyEditor"] = envyEditorParams
 	if description := strings.TrimSpace(m.Meta.HugoParamsDescription); description != "" {
 		params["description"] = description
 	}
@@ -2360,6 +3048,16 @@ func localizedMenuMain(language, repoURL, title string, includeLanguageSwitch bo
 			"name":    localizedString(language, "profiles", "Profiles"),
 			"pageRef": "/profiles",
 			"weight":  4,
+		},
+		{
+			"name":    localizedString(language, "services", "Services"),
+			"pageRef": "/services",
+			"weight":  5,
+		},
+		{
+			"name":    localizedString(language, "sets", "Sets"),
+			"pageRef": "/sets",
+			"weight":  6,
 		},
 		{
 			"name":   localizedString(language, "search", "Search"),
@@ -2831,12 +3529,6 @@ func generateSetsIndexMarkdown(m *compose.Project, language string) string {
 		"sidebar": map[string]interface{}{
 			"hide": true,
 		},
-		"menu": map[string]interface{}{
-			"main": map[string]interface{}{
-				"name":   title,
-				"weight": 10,
-			},
-		},
 	}))
 	body.WriteString(renderCardsOpen(2))
 	for _, set := range m.OrderedSets() {
@@ -2857,12 +3549,6 @@ func generateServicesIndexMarkdown(m *compose.Project, language string) string {
 		"weight":      5,
 		"sidebar": map[string]interface{}{
 			"hide": true,
-		},
-		"menu": map[string]interface{}{
-			"main": map[string]interface{}{
-				"name":   title,
-				"weight": 5,
-			},
 		},
 	}))
 	body.WriteString(renderCardsOpen(2))
@@ -2988,6 +3674,10 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 
 	if len(set.Vars()) == 0 {
 		body.WriteString(renderInfoCallout(generatedPageString(language, "setNoVariables")))
+		body.WriteString(renderCardsOpen(1))
+		body.WriteString(renderAddVarForm())
+		body.WriteString(renderCardsClose())
+		body.WriteString("\n")
 		return body.String()
 	}
 	for _, key := range compose.SortedVarKeys(set.Vars()) {
@@ -2998,6 +3688,11 @@ func generateSetMarkdown(m *compose.Project, set compose.Set, language string) s
 		body.WriteString(renderCardsClose())
 		body.WriteString("\n")
 	}
+
+	body.WriteString(renderCardsOpen(1))
+	body.WriteString(renderAddVarForm())
+	body.WriteString(renderCardsClose())
+	body.WriteString("\n")
 
 	return body.String()
 }
@@ -3410,6 +4105,10 @@ func renderAddProfileForm() string {
 
 func renderAddSetForm() string {
 	return "{{< add-set >}}\n"
+}
+
+func renderAddVarForm() string {
+	return "{{< add-var >}}\n"
 }
 
 func renderAddServiceForm() string {

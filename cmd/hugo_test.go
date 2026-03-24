@@ -1227,6 +1227,167 @@ func TestUpdateComposeSetFieldFirstSetAfterBlankLine(t *testing.T) {
 	}
 }
 
+func TestUpdateComposeSetFieldServicesAssignments(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  FOO: bar\nx-set-cache: &cache\n  BAR: baz\nservices:\n  web:\n    image: caddy:2.10\n    environment:\n      !!merge <<: [*base, *cache]\n      PORT: \"80\"\n  worker:\n    image: ghcr.io/example/worker:latest\n    environment:\n      LOG_LEVEL: info\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateSetFieldInManifest(path, "base", "services", "worker"); err != nil {
+		t.Fatalf("updateSetFieldInManifest() services error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+
+	var document yaml.Node
+	if err := yaml.Unmarshal(updated, &document); err != nil {
+		t.Fatalf("yaml.Unmarshal(updated) error = %v", err)
+	}
+
+	root, err := manifestRootNode(&document)
+	if err != nil {
+		t.Fatalf("manifestRootNode() error = %v", err)
+	}
+	servicesNode := mappingValueNode(root, "services")
+	if servicesNode == nil {
+		t.Fatalf("services mapping not found in updated manifest")
+	}
+
+	webNode := mappingValueNode(servicesNode, "web")
+	if webNode == nil {
+		t.Fatalf("service web not found in updated manifest")
+	}
+	workerNode := mappingValueNode(servicesNode, "worker")
+	if workerNode == nil {
+		t.Fatalf("service worker not found in updated manifest")
+	}
+
+	if serviceContainsSetAlias(webNode, "base") {
+		t.Fatalf("expected set alias *base to be removed from web, got:\n%s", string(updated))
+	}
+	if !serviceContainsSetAlias(webNode, "cache") {
+		t.Fatalf("expected unrelated set alias *cache to remain on web, got:\n%s", string(updated))
+	}
+	if !serviceContainsSetAlias(workerNode, "base") {
+		t.Fatalf("expected set alias *base to be added to worker, got:\n%s", string(updated))
+	}
+}
+
+func TestUpdateComposeSetFieldServicesUnknownService(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-base: &base\n  FOO: bar\nservices:\n  web:\n    image: caddy:2.10\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := updateSetFieldInManifest(path, "base", "services", "missing")
+	if err == nil {
+		t.Fatalf("expected error for unknown service, got nil")
+	}
+	if !strings.Contains(err.Error(), "service \"missing\" not found") {
+		t.Fatalf("expected unknown service error, got %v", err)
+	}
+}
+
+func TestAddVarToManifestForSet(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-authentication: &authentication\n  EXISTING: \"${EXISTING:-x}\"\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := addVarToManifest(path, "authentication", "NEW_VAR"); err != nil {
+		t.Fatalf("addVarToManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "NEW_VAR") {
+		t.Fatalf("expected NEW_VAR key to be added, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "${NEW_VAR:-}") {
+		t.Fatalf("expected NEW_VAR default interpolation to be added, got:\n%s", updatedContent)
+	}
+}
+
+func TestAddVarToManifestDuplicateVar(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-authentication: &authentication\n  EXISTING: \"${EXISTING:-x}\"\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	err := addVarToManifest(path, "authentication", "EXISTING")
+	if err == nil {
+		t.Fatalf("expected duplicate variable error, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected duplicate variable error, got %v", err)
+	}
+}
+
+func TestUpdateVarFieldInManifestRename(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-authentication: &authentication\n  EXISTING: \"${EXISTING:-x}\"\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateVarFieldInManifest(path, "authentication", "EXISTING", "name", "RENAMED"); err != nil {
+		t.Fatalf("updateVarFieldInManifest() error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if !strings.Contains(updatedContent, "RENAMED") {
+		t.Fatalf("expected RENAMED key in manifest, got:\n%s", updatedContent)
+	}
+	if strings.Contains(updatedContent, "EXISTING:") {
+		t.Fatalf("expected EXISTING key to be removed after rename, got:\n%s", updatedContent)
+	}
+}
+
+func TestUpdateVarFieldInManifestDeleteOnEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "compose.yml")
+	content := []byte("x-set-authentication: &authentication\n  EXISTING: \"${EXISTING:-x}\"\n  KEEP: \"${KEEP:-y}\"\n")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile(compose.yml) error = %v", err)
+	}
+
+	if err := updateVarFieldInManifest(path, "authentication", "EXISTING", "name", ""); err != nil {
+		t.Fatalf("updateVarFieldInManifest() delete error = %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(compose.yml) error = %v", err)
+	}
+	updatedContent := string(updated)
+	if strings.Contains(updatedContent, "EXISTING:") {
+		t.Fatalf("expected EXISTING key to be deleted, got:\n%s", updatedContent)
+	}
+	if !strings.Contains(updatedContent, "KEEP:") {
+		t.Fatalf("expected other vars to remain, got:\n%s", updatedContent)
+	}
+}
+
 func TestUpdateComposeProfileFieldInManifest(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "compose.yml")
@@ -1581,9 +1742,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 			t.Fatalf("expected generated sets index to contain %q, got:\n%s", check, string(indexContent))
 		}
 	}
-	if !strings.Contains(string(indexContent), "name: Sets") {
-		t.Fatalf("expected generated sets index to include menu metadata, got:\n%s", string(indexContent))
-	}
 	if !strings.Contains(string(indexContent), "{{< cards cols=\"2\" >}}") {
 		t.Fatalf("expected generated sets index to include cards shortcode, got:\n%s", string(indexContent))
 	}
@@ -1658,7 +1816,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	localizedSetsChecks := []string{
 		"title: Sets",
 		"description: Automatisch generierte Referenz der Konfigurations-Sets aus compose.yml.",
-		"name: Sets",
 	}
 	for _, check := range localizedSetsChecks {
 		if !strings.Contains(string(localizedSetsIndexContent), check) {
@@ -1689,7 +1846,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	servicesChecks := []string{
 		"title: Services",
 		"hide: true",
-		"name: Services",
 		"{{< add-service >}}",
 		"title=\"web\"",
 		"titleLink=\"/services/web\"",
@@ -1717,7 +1873,6 @@ func TestPrepareBuildContentDirCopiesExistingContentAndGeneratesGroupPages(t *te
 	}
 	localizedServicesChecks := []string{
 		"title: Dienste",
-		"name: Dienste",
 		"dockerImage=\"caddy:2.10\"",
 		"dockerImageLink=\"https://hub.docker.com/_/caddy\"",
 		"platform=\"linux/amd64\"",
@@ -2267,7 +2422,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 		t.Fatalf("expected menu map in hugo config, got: %#v", got["menu"])
 	}
 	mainMenu, ok := menu["main"].([]interface{})
-	if !ok || len(mainMenu) < 5 {
+	if !ok || len(mainMenu) < 7 {
 		t.Fatalf("expected non-empty menu.main, got: %#v", menu["main"])
 	}
 
@@ -2297,39 +2452,61 @@ func TestWriteTempHugoConfigFromManifestIncludesMetaIgnoreLogs(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected third menu item to be map, got: %#v", mainMenu[2])
 	}
-	if thirdMenuItem["name"] != "Search" {
-		t.Fatalf("expected third config menu item to be Search, got: %#v", thirdMenuItem["name"])
+	if thirdMenuItem["name"] != "Services" {
+		t.Fatalf("expected third config menu item to be Services, got: %#v", thirdMenuItem["name"])
 	}
-	params, ok := thirdMenuItem["params"].(map[string]interface{})
-	if !ok || params["type"] != "search" {
-		t.Fatalf("expected third menu item params.type to be search, got: %#v", thirdMenuItem["params"])
+	if thirdMenuItem["pageRef"] != "/services" {
+		t.Fatalf("expected third menu item pageRef to be /services, got: %#v", thirdMenuItem["pageRef"])
 	}
 
 	fourthMenuItem, ok := mainMenu[3].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected fourth menu item to be map, got: %#v", mainMenu[3])
 	}
-	if fourthMenuItem["name"] != "Theme" {
-		t.Fatalf("expected fourth config menu item to be Theme, got: %#v", fourthMenuItem["name"])
+	if fourthMenuItem["name"] != "Sets" {
+		t.Fatalf("expected fourth config menu item to be Sets, got: %#v", fourthMenuItem["name"])
 	}
-	themeParams, ok := fourthMenuItem["params"].(map[string]interface{})
-	if !ok || themeParams["type"] != "theme-toggle" {
-		t.Fatalf("expected fourth menu item params.type to be theme-toggle, got: %#v", fourthMenuItem["params"])
+	if fourthMenuItem["pageRef"] != "/sets" {
+		t.Fatalf("expected fourth menu item pageRef to be /sets, got: %#v", fourthMenuItem["pageRef"])
 	}
 
 	fifthMenuItem, ok := mainMenu[4].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected fifth menu item to be map, got: %#v", mainMenu[4])
 	}
-	if fifthMenuItem["name"] != "GitHub" {
-		t.Fatalf("expected fifth config menu item to be GitHub, got: %#v", fifthMenuItem["name"])
+	if fifthMenuItem["name"] != "Search" {
+		t.Fatalf("expected fifth config menu item to be Search, got: %#v", fifthMenuItem["name"])
 	}
-	if fifthMenuItem["url"] != "https://github.com/front-matter/envy" {
-		t.Fatalf("expected fifth menu item url to be repo URL, got: %#v", fifthMenuItem["url"])
+	params, ok := fifthMenuItem["params"].(map[string]interface{})
+	if !ok || params["type"] != "search" {
+		t.Fatalf("expected fifth menu item params.type to be search, got: %#v", fifthMenuItem["params"])
 	}
-	githubParams, ok := fifthMenuItem["params"].(map[string]interface{})
+
+	sixthMenuItem, ok := mainMenu[5].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected sixth menu item to be map, got: %#v", mainMenu[5])
+	}
+	if sixthMenuItem["name"] != "Theme" {
+		t.Fatalf("expected sixth config menu item to be Theme, got: %#v", sixthMenuItem["name"])
+	}
+	themeParams, ok := sixthMenuItem["params"].(map[string]interface{})
+	if !ok || themeParams["type"] != "theme-toggle" {
+		t.Fatalf("expected sixth menu item params.type to be theme-toggle, got: %#v", sixthMenuItem["params"])
+	}
+
+	seventhMenuItem, ok := mainMenu[6].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected seventh menu item to be map, got: %#v", mainMenu[6])
+	}
+	if seventhMenuItem["name"] != "GitHub" {
+		t.Fatalf("expected seventh config menu item to be GitHub, got: %#v", seventhMenuItem["name"])
+	}
+	if seventhMenuItem["url"] != "https://github.com/front-matter/envy" {
+		t.Fatalf("expected seventh menu item url to be repo URL, got: %#v", seventhMenuItem["url"])
+	}
+	githubParams, ok := seventhMenuItem["params"].(map[string]interface{})
 	if !ok || githubParams["icon"] != "github" {
-		t.Fatalf("expected fifth menu item params.icon to be github, got: %#v", fifthMenuItem["params"])
+		t.Fatalf("expected seventh menu item params.icon to be github, got: %#v", seventhMenuItem["params"])
 	}
 }
 
@@ -2416,6 +2593,74 @@ func TestWriteTempHugoConfigFromManifestAlwaysIncludesProfilesMenu(t *testing.T)
 	}
 	if firstMenuItem["name"] != "Profiles" || firstMenuItem["pageRef"] != "/profiles" {
 		t.Fatalf("expected first menu item to be Profiles with pageRef /profiles, got: %#v", firstMenuItem)
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestDisablesEditorWithoutWatchAPI(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &compose.Project{}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "", ""); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	params, ok := got["params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params map in hugo config, got: %#v", got["params"])
+	}
+	envyEditor, ok := params["envyEditor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params.envyEditor map, got: %#v", params["envyEditor"])
+	}
+	if enabled := envyEditor["enabled"]; enabled != false {
+		t.Fatalf("expected params.envyEditor.enabled=false without watch API, got: %#v", enabled)
+	}
+	if _, hasAPIURL := envyEditor["apiURL"]; hasAPIURL {
+		t.Fatalf("expected params.envyEditor.apiURL to be omitted without watch API, got: %#v", envyEditor["apiURL"])
+	}
+}
+
+func TestWriteTempHugoConfigFromManifestEnablesEditorWithWatchAPI(t *testing.T) {
+	siteDir := t.TempDir()
+	m := &compose.Project{}
+
+	if err := writeTempHugoConfigFromManifest(m, siteDir, "", "http://localhost:1313"); err != nil {
+		t.Fatalf("writeTempHugoConfigFromManifest(): %v", err)
+	}
+
+	configBytes, err := os.ReadFile(filepath.Join(siteDir, "hugo.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile(hugo.yaml): %v", err)
+	}
+
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(configBytes, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(hugo.yaml): %v", err)
+	}
+
+	params, ok := got["params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params map in hugo config, got: %#v", got["params"])
+	}
+	envyEditor, ok := params["envyEditor"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params.envyEditor map, got: %#v", params["envyEditor"])
+	}
+	if enabled := envyEditor["enabled"]; enabled != true {
+		t.Fatalf("expected params.envyEditor.enabled=true with watch API, got: %#v", enabled)
+	}
+	if apiURL := envyEditor["apiURL"]; apiURL != "http://localhost:1313" {
+		t.Fatalf("expected params.envyEditor.apiURL to be watch API URL, got: %#v", apiURL)
 	}
 }
 
@@ -2618,7 +2863,7 @@ func TestWriteTempHugoConfigFromManifestIncludesMultilanguage(t *testing.T) {
 		t.Fatalf("expected languages.de.menu map, got: %#v", deConfig["menu"])
 	}
 	deMainMenu, ok := deMenu["main"].([]interface{})
-	if !ok || len(deMainMenu) < 5 {
+	if !ok || len(deMainMenu) < 7 {
 		t.Fatalf("expected localized languages.de.menu.main, got: %#v", deMenu["main"])
 	}
 
@@ -2631,15 +2876,23 @@ func TestWriteTempHugoConfigFromManifestIncludesMultilanguage(t *testing.T) {
 		t.Fatalf("expected second german menu item to be Profile, got: %#v", deMainMenu[1])
 	}
 	deThirdMenuItem, ok := deMainMenu[2].(map[string]interface{})
-	if !ok || deThirdMenuItem["name"] != "Suche" {
-		t.Fatalf("expected third german menu item to be Suche, got: %#v", deMainMenu[2])
+	if !ok || deThirdMenuItem["name"] != "Dienste" {
+		t.Fatalf("expected third german menu item to be Dienste, got: %#v", deMainMenu[2])
 	}
 	deFourthMenuItem, ok := deMainMenu[3].(map[string]interface{})
-	if !ok || deFourthMenuItem["name"] != "Design" {
-		t.Fatalf("expected fourth german menu item to be Design, got: %#v", deMainMenu[3])
+	if !ok || deFourthMenuItem["name"] != "Sets" {
+		t.Fatalf("expected fourth german menu item to be Sets, got: %#v", deMainMenu[3])
 	}
 	deFifthMenuItem, ok := deMainMenu[4].(map[string]interface{})
-	if !ok || deFifthMenuItem["name"] != "Sprache" {
-		t.Fatalf("expected fifth german menu item to be Sprache, got: %#v", deMainMenu[4])
+	if !ok || deFifthMenuItem["name"] != "Suche" {
+		t.Fatalf("expected fifth german menu item to be Suche, got: %#v", deMainMenu[4])
+	}
+	deSixthMenuItem, ok := deMainMenu[5].(map[string]interface{})
+	if !ok || deSixthMenuItem["name"] != "Design" {
+		t.Fatalf("expected sixth german menu item to be Design, got: %#v", deMainMenu[5])
+	}
+	deSeventhMenuItem, ok := deMainMenu[6].(map[string]interface{})
+	if !ok || deSeventhMenuItem["name"] != "Sprache" {
+		t.Fatalf("expected seventh german menu item to be Sprache, got: %#v", deMainMenu[6])
 	}
 }

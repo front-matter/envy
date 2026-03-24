@@ -1,0 +1,33 @@
+{{- $editorEnabled := site.Params.envyEditor.enabled | default false -}}
+{{- if $editorEnabled -}}
+<div
+  x-data="envyVarAdder()"
+  class="hextra-card hx:group hx:flex hx:flex-col hx:justify-start hx:overflow-hidden hx:rounded-lg hx:border hx:border-gray-200 hx:text-current hx:no-underline hx:dark:shadow-none hx:hover:shadow-gray-100 hx:dark:hover:shadow-none hx:shadow-gray-100 hx:active:shadow-sm hx:active:shadow-gray-200 hx:transition-all hx:duration-200 hx:relative hx:bg-transparent hx:shadow-xs hx:hover:border-gray-300 hx:dark:border-neutral-800 hx:hover:bg-slate-50 hx:hover:shadow-md hx:dark:hover:border-neutral-700 hx:dark:hover:bg-neutral-900 hx:cursor-text"
+  x-bind:class="flashClasses() + ' ' + cardStateClasses()"
+  x-on:click="if (!isEditing) enterEdit()"
+  x-on:keydown.enter.prevent="if (!isEditing) enterEdit()"
+  x-on:keydown.space.prevent="if (!isEditing) enterEdit()"
+  tabindex="0"
+>
+  <div class="hx:flex hx:font-semibold hx:items-center hx:p-4 hx:text-xl hx:text-gray-700 hx:dark:text-neutral-200">
+    <div
+      x-show="!isEditing"
+      class="hx:flex-1 hx:outline-none hx:cursor-text hx:text-sm hx:font-normal hx:text-gray-500 hx:hover:text-gray-500 hx:dark:text-gray-400 hx:dark:hover:text-gray-400"
+      role="button"
+      tabindex="-1"
+      x-text='{{ i18n "addVarPlaceholder" | default "Add a variable" | jsonify }}'
+    ></div>
+    <textarea
+      x-show="isEditing"
+      x-ref="varInput"
+      rows="1"
+      name="value"
+      spellcheck="false"
+      x-model="draftValue"
+      class="hx:w-full hx:resize-none hx:rounded-md hx:border hx:border-blue-200 hx:bg-blue-50/70 hx:px-3 hx:py-2 hx:text-xl hx:font-semibold hx:text-blue-950 hx:shadow-sm hx:outline-none focus:hx:bg-white/60 hx:dark:border-blue-200/30 hx:dark:bg-blue-900/20 hx:dark:text-blue-100 hx:dark:focus:hx:bg-blue-950/20"
+      x-on:blur="if (!draftValue.trim()) cancelEdit()"
+      x-on:keydown="handleKeydown($event)"
+    ></textarea>
+  </div>
+</div>
+{{- end -}}

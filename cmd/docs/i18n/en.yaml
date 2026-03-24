@@ -56,6 +56,8 @@ addProfilePlaceholder: "Add a profile"
 set: "Set"
 sets: "Sets"
 addSetPlaceholder: "Add a set"
+addVarPlaceholder: "Add a variable"
+
 generatedSetsDescription: "Auto-generated configuration set reference from compose.yml."
 generatedServicesDescription: "Auto-generated service reference from compose.yml."
 generatedProfilesDescription: "Auto-generated profile reference from compose.yml."
