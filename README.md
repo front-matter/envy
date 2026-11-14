@@ -37,6 +37,7 @@ envy [command] [flags]
 
 Commands:
   import      Import .env files and generate compose.yml
+  fetch       Fetch compose.yml from a code repository or URL
   validate    Validate a compose.yml (using docker compose config)
   render      Render compose.yml without anchors and x- fields
   lint        Lint compose.yml for warnings
@@ -63,6 +64,18 @@ envy import
 # Or import a specific file/directory via positional arg
 envy import .env
 envy import ./config
+
+# Or import a raw .env file from an http(s) URL
+envy import https://raw.githubusercontent.com/org/repo/main/.env.example
+
+# Fetch compose.yml/compose.yaml from the root of a GitHub, GitLab or Codeberg
+# repository (default branch); the scheme is optional, like a Go module path
+envy fetch https://github.com/front-matter/envy
+envy fetch codeberg.org/org/repo
+
+# Or fetch a compose file from any http(s) URL ending in .yml/.yaml.
+# Compose files are validated and written unchanged, keeping comments.
+envy fetch https://example.org/compose.yml
 
 # --file accepts a folder and writes ./generated/compose.yml
 envy import .env --file ./generated

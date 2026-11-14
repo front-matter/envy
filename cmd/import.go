@@ -29,16 +29,21 @@ var importCmd = &cobra.Command{
 Auto-detection: If no files are specified, the command looks for .env and .env.example
 in the current directory.
 
+Source: The optional [path] argument can be a .env file, a directory, or an http(s)
+URL pointing to a raw .env file. To download a compose file or the compose file of a
+code repository, use "envy fetch".
+
 File paths: The --file flag can be either a folder or a file path ending in .yaml/.yml.
 - Folder: creates the folder if needed and writes to folder/compose.yml
 - File: .yaml/.yml file path, creates parent directories as needed
 
 Examples:
   envy import
-	  envy import .env
-	  envy import ./config
-	  envy import --file config/
-	  envy import --file config.yaml`,
+  envy import .env
+  envy import ./config
+  envy import https://raw.githubusercontent.com/org/repo/main/.env.example
+  envy import --file config/
+  envy import --file config.yaml`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Resolve destination path (handles folder or file path)
@@ -52,16 +57,6 @@ Examples:
 			sourcePath = args[0]
 		}
 
-		// Determine which files to import
-		filesToImport, err := resolveImportPaths(sourcePath)
-		if err != nil {
-			return err
-		}
-
-		if len(filesToImport) == 0 {
-			return fmt.Errorf("no import files found (tried auto-detection of .env and .env.example)")
-		}
-
 		// Do not overwrite existing files.
 		exists, err := FileExists(path)
 		if err != nil {
@@ -70,6 +65,20 @@ Examples:
 		if exists {
 			color.Yellow("Warning: %s already exists; not writing file.", path)
 			return nil
+		}
+
+		if isURL(sourcePath) {
+			return importEnvURL(sourcePath, path)
+		}
+
+		// Determine which files to import
+		filesToImport, err := resolveImportPaths(sourcePath)
+		if err != nil {
+			return err
+		}
+
+		if len(filesToImport) == 0 {
+			return fmt.Errorf("no import files found (tried auto-detection of .env and .env.example)")
 		}
 
 		// Color output for detected files
@@ -91,26 +100,31 @@ Examples:
 			color.Green("✓ Imported %s", importPath)
 		}
 
-		// Merge manifests
-		merged := reader.Merge(manifests...)
-
-		for _, w := range verifyServiceCommandVarsDefined(merged) {
-			color.Yellow("Warning: %s", w)
-		}
-
-		// Marshal and write
-		content, err := yaml.Marshal(merged)
-		if err != nil {
-			return fmt.Errorf("rendering manifest YAML: %w", err)
-		}
-
-		if err := envfile.Write(path, string(content)); err != nil {
-			return err
-		}
-
-		color.Green("✓ Written %s", path)
-		return nil
+		return writeManifest(path, reader.Merge(manifests...))
 	},
+}
+
+// writeManifest warns about undefined command vars and writes m as YAML to path.
+func writeManifest(path string, m *compose.Project) error {
+	warnUndefinedCommandVars(m)
+
+	content, err := yaml.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("rendering manifest YAML: %w", err)
+	}
+
+	if err := envfile.Write(path, string(content)); err != nil {
+		return err
+	}
+
+	color.Green("✓ Written %s", path)
+	return nil
+}
+
+func warnUndefinedCommandVars(m *compose.Project) {
+	for _, w := range verifyServiceCommandVarsDefined(m) {
+		color.Yellow("Warning: %s", w)
+	}
 }
 
 // importFile detects file type and imports accordingly.
