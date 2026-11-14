@@ -118,6 +118,14 @@ envy render compose.yml --output compose.rendered.yml
 envy render compose.yml --output compose.rendered.yml --check
 ```
 
+For a platform that provides database, cache and search itself, keep only the
+application services; `depends_on` entries and volumes of the other services
+are removed with them:
+
+```bash
+envy render compose.yml --service web --service worker --output deploy/compose.yml
+```
+
 ### Persistent Content Workflow
 
 `envy build` writes generated Markdown into the local [.envy](.envy) folder.

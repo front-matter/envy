@@ -17,6 +17,17 @@ const mergeKey = "<<"
 // because it is not a YAML mapping or a merge key does not refer to mappings.
 var ErrRenderInput = errors.New("invalid compose file for rendering")
 
+// RenderOptions controls Render.
+type RenderOptions struct {
+	// Header, if not empty, is written as a comment at the top of the result.
+	Header string
+	// Services, if not empty, keeps only these services, e.g. web and worker
+	// for a platform that provides database, cache and search itself. The
+	// depends_on entries pointing to the other services and the top-level
+	// volumes that only they use are removed as well.
+	Services []string
+}
+
 // Render returns a plain Compose file for tools that do not handle YAML
 // anchors well (e.g. deployment platforms that re-serialize the file):
 //
@@ -28,9 +39,9 @@ var ErrRenderInput = errors.New("invalid compose file for rendering")
 //
 // Values are not interpolated: "${VAR}" and "${VAR:-default}" are kept as
 // they are, so the result is still configured through the environment.
-// Key order is preserved. header, if not empty, is written as a comment at
-// the top of the result.
-func Render(data []byte, header string) ([]byte, error) {
+// Key order is preserved. See RenderOptions for the header and for leaving
+// out services by profile.
+func Render(data []byte, opts RenderOptions) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRenderInput, err)
@@ -44,9 +55,14 @@ func Render(data []byte, header string) ([]byte, error) {
 		return nil, err
 	}
 	root.Content = withoutExtensionFields(root.Content)
+	if len(opts.Services) > 0 {
+		if err := keepServices(root, opts.Services); err != nil {
+			return nil, err
+		}
+	}
 
 	var buf bytes.Buffer
-	for _, line := range strings.Split(strings.TrimSpace(header), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(opts.Header), "\n") {
 		if line == "" {
 			continue
 		}
@@ -186,4 +202,150 @@ func copyNode(node *yaml.Node) *yaml.Node {
 	out.LineComment = ""
 	out.FootComment = ""
 	return &out
+}
+
+// keepServices removes all services except names, the depends_on entries
+// that refer to removed services and the top-level volumes that only removed
+// services mounted. It fails if one of names is not a service.
+func keepServices(root *yaml.Node, names []string) error {
+	services := mappingValue(root, "services")
+	if services == nil || services.Kind != yaml.MappingNode {
+		return fmt.Errorf("%w: no services to select from", ErrRenderInput)
+	}
+
+	keep := make(map[string]bool, len(names))
+	for _, n := range names {
+		keep[n] = true
+	}
+	for n := range keep {
+		if mappingValue(services, n) == nil {
+			return fmt.Errorf("%w: service %q not found", ErrRenderInput, n)
+		}
+	}
+
+	removed := make(map[string]bool)
+	removedVolumes := make(map[string]bool)
+	kept := make([]*yaml.Node, 0, len(services.Content))
+	for i := 0; i+1 < len(services.Content); i += 2 {
+		name, svc := services.Content[i], services.Content[i+1]
+		if !keep[name.Value] {
+			removed[name.Value] = true
+			for _, v := range namedVolumes(svc) {
+				removedVolumes[v] = true
+			}
+			continue
+		}
+		kept = append(kept, name, svc)
+	}
+	if len(removed) == 0 {
+		return nil
+	}
+	services.Content = kept
+
+	usedVolumes := make(map[string]bool)
+	for i := 1; i < len(services.Content); i += 2 {
+		svc := services.Content[i]
+		removeDependencies(svc, removed)
+		for _, v := range namedVolumes(svc) {
+			usedVolumes[v] = true
+		}
+	}
+
+	if volumes := mappingValue(root, "volumes"); volumes != nil && volumes.Kind == yaml.MappingNode {
+		content := make([]*yaml.Node, 0, len(volumes.Content))
+		for i := 0; i+1 < len(volumes.Content); i += 2 {
+			name := volumes.Content[i].Value
+			if removedVolumes[name] && !usedVolumes[name] {
+				continue
+			}
+			content = append(content, volumes.Content[i], volumes.Content[i+1])
+		}
+		volumes.Content = content
+	}
+	return nil
+}
+
+// mappingValue returns the value of key in mapping node, or nil.
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// removeDependencies drops depends_on entries (list or mapping form) that
+// refer to removed services, and depends_on itself when it becomes empty.
+func removeDependencies(svc *yaml.Node, removed map[string]bool) {
+	deps := mappingValue(svc, "depends_on")
+	if deps == nil {
+		return
+	}
+	switch deps.Kind {
+	case yaml.SequenceNode:
+		content := make([]*yaml.Node, 0, len(deps.Content))
+		for _, d := range deps.Content {
+			if !removed[d.Value] {
+				content = append(content, d)
+			}
+		}
+		deps.Content = content
+	case yaml.MappingNode:
+		content := make([]*yaml.Node, 0, len(deps.Content))
+		for i := 0; i+1 < len(deps.Content); i += 2 {
+			if !removed[deps.Content[i].Value] {
+				content = append(content, deps.Content[i], deps.Content[i+1])
+			}
+		}
+		deps.Content = content
+	default:
+		return
+	}
+	if len(deps.Content) == 0 {
+		removeMappingKey(svc, "depends_on")
+	}
+}
+
+func removeMappingKey(node *yaml.Node, key string) {
+	content := make([]*yaml.Node, 0, len(node.Content))
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value != key {
+			content = append(content, node.Content[i], node.Content[i+1])
+		}
+	}
+	node.Content = content
+}
+
+// namedVolumes returns the named volumes a service mounts, in short
+// ("name:/path[:mode]") or long (type: volume, source: name) syntax. Bind
+// mounts (paths) and interpolated sources are not named volumes.
+func namedVolumes(svc *yaml.Node) []string {
+	list := mappingValue(svc, "volumes")
+	if list == nil || list.Kind != yaml.SequenceNode {
+		return nil
+	}
+	var names []string
+	for _, v := range list.Content {
+		var source string
+		switch v.Kind {
+		case yaml.ScalarNode:
+			source, _, _ = strings.Cut(v.Value, ":")
+		case yaml.MappingNode:
+			if t := mappingValue(v, "type"); t != nil && t.Value != "volume" {
+				continue
+			}
+			if src := mappingValue(v, "source"); src != nil {
+				source = src.Value
+			}
+		}
+		if source == "" || strings.ContainsAny(source[:1], "/.~$") {
+			continue
+		}
+		names = append(names, source)
+	}
+	return names
 }
