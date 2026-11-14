@@ -95,8 +95,9 @@ envy generate > .env.example
 cp .env.example .env
 # ... adjust values ...
 
-# Validate before deploying
-envy validate .env.prod
+# Validate compose.yml in the current directory before deploying
+# (or pass a path: envy validate deploy/compose.yml)
+envy validate
 
 # Print envy version
 envy --version
