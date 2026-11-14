@@ -38,6 +38,7 @@ envy [command] [flags]
 Commands:
   import      Import .env files and generate compose.yml
   validate    Validate a compose.yml (using docker compose config)
+  render      Render compose.yml without anchors and x- fields
   lint        Lint compose.yml for warnings
   diff        Show variables missing from or extra in a .env file
   generate    Generate a .env file from compose.yml
@@ -96,6 +97,25 @@ envy server --bind 0.0.0.0
 
 # Deploy documentation site to GitHub Pages
 envy deploy --target production
+```
+
+### Rendering for deployment platforms
+
+Some deployment platforms re-serialize compose files and do not handle YAML
+anchors and merge keys reliably. `envy render` writes a plain Compose file:
+anchors and merge keys (including `<<: [*a, *b]`) are expanded, top-level `x-`
+fields such as `x-envy` and `x-set-*` are removed, and comments are dropped.
+Variables like `${VAR}` are kept, not interpolated.
+
+```bash
+# Print the rendered compose file
+envy render
+
+# Write it next to the manifest and commit it
+envy render compose.yml --output compose.rendered.yml
+
+# In CI: fail if the committed file is out of date
+envy render compose.yml --output compose.rendered.yml --check
 ```
 
 ### Persistent Content Workflow
