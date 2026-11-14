@@ -85,6 +85,9 @@ homebrew_casks:
     repository:
       owner: front-matter
       name: homebrew-envy
+      # GITHUB_TOKEN in Actions is scoped to this repository and cannot push
+      # to the tap, so the tap uses its own token.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     # Optional: either set it to Casks, or remove it:
     directory: Casks
 

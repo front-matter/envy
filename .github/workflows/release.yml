@@ -28,4 +28,8 @@ jobs:
           version: "~> v2"
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          # Built-in token: creates the release in this repository.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Personal access token with Contents read/write on
+          # front-matter/homebrew-envy: pushes the Homebrew cask.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
