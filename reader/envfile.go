@@ -2,6 +2,7 @@ package reader
 
 import (
 	"fmt"
+	"io"
 
 	types "github.com/compose-spec/compose-go/v2/types"
 
@@ -16,6 +17,21 @@ func ImportEnvFile(path string) (*compose.Project, error) {
 		return nil, fmt.Errorf("loading env file %s: %w", path, err)
 	}
 
+	return projectFromEnv(env, path)
+}
+
+// ImportEnv reads .env content from r and converts it to an envy compose.
+// source names the origin (e.g. a URL) and is used in messages and metadata.
+func ImportEnv(r io.Reader, source string) (*compose.Project, error) {
+	env, err := envfile.Parse(r)
+	if err != nil {
+		return nil, fmt.Errorf("parsing env content from %s: %w", source, err)
+	}
+
+	return projectFromEnv(env, source)
+}
+
+func projectFromEnv(env *envfile.Env, path string) (*compose.Project, error) {
 	if len(env.Keys) == 0 {
 		return nil, fmt.Errorf("env file %s has no variables", path)
 	}

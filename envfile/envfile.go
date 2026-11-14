@@ -4,6 +4,7 @@ package envfile
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -22,8 +23,13 @@ func Load(path string) (*Env, error) {
 	}
 	defer f.Close()
 
+	return Parse(f)
+}
+
+// Parse reads .env content from r, skipping blank lines and comments.
+func Parse(r io.Reader) (*Env, error) {
 	e := &Env{Values: make(map[string]string)}
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

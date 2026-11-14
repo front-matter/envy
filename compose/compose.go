@@ -1690,16 +1690,22 @@ func Load(path string) (*Project, error) {
 		return nil, fmt.Errorf("reading compose file %s: %w", path, err)
 	}
 
+	return Parse(data, path)
+}
+
+// Parse parses compose YAML into a Project and preserves the raw YAML node
+// for comment/round-trip access. name identifies the source in error messages.
+func Parse(data []byte, name string) (*Project, error) {
 	// Parse into a raw yaml.Node to preserve everything (comments, ordering, etc.)
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("parsing compose file %s: %w", path, err)
+		return nil, fmt.Errorf("parsing compose file %s: %w", name, err)
 	}
 
 	// Now unmarshal into Project structure
 	var p Project
 	if err := yaml.Unmarshal(data, &p); err != nil {
-		return nil, fmt.Errorf("decoding compose file %s: %w", path, err)
+		return nil, fmt.Errorf("decoding compose file %s: %w", name, err)
 	}
 
 	// Store the raw node for potential round-trip use
