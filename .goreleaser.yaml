@@ -91,15 +91,12 @@ homebrew_casks:
     # Optional: either set it to Casks, or remove it:
     directory: Casks
 
-    # Optional: helps pass `homebrew audit` if homepage is different from download domain:
-    url:
-      verified: github.com/front-matter/envy
-
-    # Optional: if your app/binary isn't signed and notarized, you'll need this:
+    # The binary isn't signed and notarized, so remove the macOS quarantine
+    # attribute after install. install_steps uses Homebrew's declarative
+    # install steps DSL; {{ .StagedPath }} renders as Homebrew's {{staged_path}}.
     hooks:
       post:
-        # replace foo with the actual binary name
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/envy"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/envy"]
           end
