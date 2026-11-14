@@ -17,13 +17,20 @@ var validateCmd = &cobra.Command{
 	Use:   "validate [path]",
 	Short: "Validate compose manifest as a valid Docker Compose file",
 	Long: `Validate a compose manifest by running "compose config".
+Without a path or --file it validates compose.yml (or compose.yaml,
+docker-compose.yml, docker-compose.yaml) in the current directory.
 This uses the local Docker Compose CLI and fails if the file is not a valid Compose configuration.
 
 Examples:
   envy validate
-	  envy validate compose.yml
-	  envy validate ./config/compose.yml`,
+  envy validate compose.yml
+  envy validate ./config/compose.yml`,
 	Args: cobra.MaximumNArgs(1),
+	// validate only reads the compose file, so it skips the .gitignore check
+	// of the root command (see render).
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := resolveValidateComposePath(args)
 		if err != nil {
@@ -48,7 +55,12 @@ func resolveValidateComposePath(args []string) (string, error) {
 		return candidate, nil
 	}
 
-	return resolveManifest(manifestPath)
+	if manifestPath != "" {
+		return manifestPath, nil
+	}
+	// Only the current directory: a manifest in a parent belongs to another
+	// project.
+	return compose.FindIn(".")
 }
 
 func validateComposeFile(path string) error {

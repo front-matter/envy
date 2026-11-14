@@ -26,28 +26,31 @@ func ensureRequiredGitignoreEntries() error {
 	)
 }
 
+// missingRequiredGitignoreEntries returns the required entries that no
+// .gitignore covers for files in dir. Like git, it reads the .gitignore files
+// in dir and in its parents up to the repository root (the first directory
+// with a .git entry), so a subdirectory of a repository whose root .gitignore
+// lists .env passes. Outside a repository only dir's own .gitignore counts.
+// Entries anchored with a leading slash only count in dir itself, because in
+// a parent they match the parent's file, not dir's.
 func missingRequiredGitignoreEntries(dir string, required []string) ([]string, error) {
-	path := filepath.Join(dir, ".gitignore")
-	content, err := os.ReadFile(path)
+	abs, err := filepath.Abs(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return append([]string(nil), required...), nil
-		}
-		return nil, err
+		return nil, fmt.Errorf("resolving %s: %w", dir, err)
 	}
 
-	lines := strings.Split(string(content), "\n")
-	present := make(map[string]bool, len(required))
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	dirs := []string{abs}
+	if root, ok := repositoryRoot(abs); ok {
+		for d := abs; d != root; {
+			d = filepath.Dir(d)
+			dirs = append(dirs, d)
 		}
+	}
 
-		for _, entry := range required {
-			if matchesGitignoreEntry(line, entry) {
-				present[entry] = true
-			}
+	present := make(map[string]bool, len(required))
+	for i, d := range dirs {
+		if err := addGitignoreEntries(filepath.Join(d, ".gitignore"), required, i == 0, present); err != nil {
+			return nil, err
 		}
 	}
 
@@ -59,6 +62,51 @@ func missingRequiredGitignoreEntries(dir string, required []string) ([]string, e
 	}
 
 	return missing, nil
+}
+
+// repositoryRoot returns the nearest directory at or above dir that contains
+// a .git entry (directory, or file for worktrees and submodules).
+func repositoryRoot(dir string) (string, bool) {
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d, true
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "", false
+		}
+		d = parent
+	}
+}
+
+// addGitignoreEntries marks the required entries that the .gitignore at path
+// covers. A missing file covers nothing. anchoredOK reports whether entries
+// with a leading slash apply, i.e. whether path is in the checked directory.
+func addGitignoreEntries(path string, required []string, anchoredOK bool, present map[string]bool) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	for _, raw := range strings.Split(string(content), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "/") && !anchoredOK {
+			continue
+		}
+
+		for _, entry := range required {
+			if matchesGitignoreEntry(line, entry) {
+				present[entry] = true
+			}
+		}
+	}
+	return nil
 }
 
 func matchesGitignoreEntry(line, target string) bool {
