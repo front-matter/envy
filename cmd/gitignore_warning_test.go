@@ -116,3 +116,42 @@ func TestEnsureRequiredGitignoreEntries_MissingEntryReturnsError(t *testing.T) {
 		t.Fatalf("unexpected error message: %q", err.Error())
 	}
 }
+
+func TestMissingRequiredGitignoreEntries_ParentDirectories(t *testing.T) {
+	tests := []struct {
+		name        string
+		gitDir      bool
+		rootIgnore  string
+		wantMissing []string
+	}{
+		{name: "repository root covers subdirectory", gitDir: true, rootIgnore: ".env\n", wantMissing: []string{}},
+		{name: "anchored root entry does not cover subdirectory", gitDir: true, rootIgnore: "/.env\n", wantMissing: []string{".env"}},
+		{name: "outside a repository parents are ignored", gitDir: false, rootIgnore: ".env\n", wantMissing: []string{".env"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if tt.gitDir {
+				if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+					t.Fatalf("Mkdir(.git): %v", err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(tt.rootIgnore), 0o644); err != nil {
+				t.Fatalf("WriteFile(.gitignore): %v", err)
+			}
+			sub := filepath.Join(root, "deploy", "staging")
+			if err := os.MkdirAll(sub, 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+
+			missing, err := missingRequiredGitignoreEntries(sub, requiredGitignoreEntries)
+			if err != nil {
+				t.Fatalf("missingRequiredGitignoreEntries(): %v", err)
+			}
+			if !reflect.DeepEqual(missing, tt.wantMissing) {
+				t.Fatalf("expected %v, got %v", tt.wantMissing, missing)
+			}
+		})
+	}
+}
