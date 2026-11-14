@@ -80,3 +80,36 @@ func TestCheckRendered(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestRenderCommandSkipsGitignoreCheck(t *testing.T) {
+	path := writeRenderManifest(t)
+	dir := t.TempDir() // no .gitignore here
+	output := filepath.Join(dir, "deploy", "compose.yml")
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		t.Fatalf("creating output dir: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd) // best effort: restore the working directory for other tests
+		renderOutput, renderCheck, renderServices = "", false, nil
+	})
+
+	rootCmd.SetArgs([]string{"render", path, "--service", "web", "--output", output})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("envy render without .gitignore: %v", err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	if !strings.Contains(string(got), "web:") {
+		t.Fatalf("unexpected output:\n%s", got)
+	}
+}

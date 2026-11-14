@@ -42,6 +42,12 @@ Examples:
   envy render compose.yml --output compose.rendered.yml --check
   envy render compose.yml --service web --service worker --output deploy/compose.yml`,
 	Args: cobra.MaximumNArgs(1),
+	// render writes no .env file, so it does not need the .gitignore check of
+	// the root command; it often runs in a deployment repository that has no
+	// .env files at all. A command's own persistent pre-run replaces the root's.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := resolveValidateComposePath(args)
 		if err != nil {
